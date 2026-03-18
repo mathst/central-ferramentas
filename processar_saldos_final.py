@@ -34,7 +34,7 @@ SQL_DATABASE = os.getenv("SQL_DATABASE", _DEFAULTS["SQL_DATABASE"])
 SQL_USER     = os.getenv("SQL_USER",     _DEFAULTS["SQL_USER"])
 SQL_PASSWORD = os.getenv("SQL_PASSWORD", _DEFAULTS["SQL_PASSWORD"])
 
-EMPRESAS = [19]
+EMPRESAS = [1,2]
 
 # EMPRESAS = [1, 2, 3, 4, 5, 6, 7, 8, 19, 112]
 # EMPRESAS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,20, 22, 23, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 53, 54, 55, 58, 66, 68, 69, 83, 90, 96, 138]
@@ -54,11 +54,32 @@ def validar_config() -> None:
         sys.exit(1)
 
 
+def _detectar_driver_sql_server() -> str:
+    """Retorna o melhor driver ODBC para SQL Server disponível na máquina."""
+    preferencia = [
+        "ODBC Driver 18 for SQL Server",
+        "ODBC Driver 17 for SQL Server",
+        "ODBC Driver 13 for SQL Server",
+        "SQL Server Native Client 11.0",
+        "SQL Server",
+    ]
+    disponiveis = pyodbc.drivers()
+    for driver in preferencia:
+        if driver in disponiveis:
+            return driver
+    raise RuntimeError(
+        f"Nenhum driver ODBC para SQL Server encontrado.\n"
+        f"Drivers disponíveis: {disponiveis}\n"
+        f"Instale o ODBC Driver 18: aka.ms/odbc18"
+    )
+
+
 def conectar_banco() -> pyodbc.Connection:
-    """Estabelece conexão com SQL Server"""
+    """Estabelece conexão com SQL Server usando o melhor driver disponível."""
     try:
+        driver = _detectar_driver_sql_server()
         conn_str = (
-            f"DRIVER={{ODBC Driver 18 for SQL Server}};"
+            f"DRIVER={{{driver}}};"
             f"SERVER={SQL_SERVER};"
             f"DATABASE={SQL_DATABASE};"
             f"UID={SQL_USER};"
@@ -66,8 +87,11 @@ def conectar_banco() -> pyodbc.Connection:
             f"TrustServerCertificate=yes;"
         )
         conn = pyodbc.connect(conn_str)
-        print(f"✅ Conectado: {SQL_DATABASE}@{SQL_SERVER}")
+        print(f"✅ Conectado: {SQL_DATABASE}@{SQL_SERVER} via {driver}")
         return conn
+    except RuntimeError as e:
+        print(f"❌ {e}")
+        sys.exit(1)
     except pyodbc.Error as e:
         print(f"❌ Erro de conexão: {e}")
         sys.exit(1)

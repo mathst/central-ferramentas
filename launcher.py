@@ -1,34 +1,19 @@
 """
-launcher.py — Entry point do bundle PyInstaller para Central de Ferramentas.
+launcher.py — Entry point do bundle PyInstaller (--onefile).
 
-Design: processo único, sem threads de retry, sem loops de spawn.
-Se algo falhar → mostra erro via MessageBox Win32 e sai com os._exit.
+IMPORTANTE: Em --onefile, sys.executable É o próprio .exe.
+Chamar Popen([sys.executable, ...]) re-executa o launcher = loop infinito.
+
+Solução: uvicorn roda em thread dentro do MESMO processo.
+Zero subprocessos. Zero risco de loop.
 """
 import os
 import sys
 import socket
 import time
-import subprocess
-import atexit
+import threading
 from pathlib import Path
 
-# ── Processo servidor (único) ─────────────────────────────────────────────────
-_proc: subprocess.Popen | None = None
-
-
-def _kill() -> None:
-    if _proc and _proc.poll() is None:
-        try:
-            _proc.kill()
-            _proc.wait(timeout=3)
-        except Exception:
-            pass
-
-
-atexit.register(_kill)
-
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _get_bundle_dir() -> Path:
     if getattr(sys, "frozen", False):
@@ -44,34 +29,32 @@ def _free_port(start: int = 8000) -> int:
                 return port
             except OSError:
                 continue
-    raise OSError("Nenhuma porta disponível em 8000-8009.")
+    raise OSError("Nenhuma porta livre em 8000-8009.")
 
 
-def _wait_server(port: int, timeout: int = 60) -> bool:
+def _wait_server(port: int, timeout: int = 30) -> bool:
     import urllib.request
     deadline = time.time() + timeout
     while time.time() < deadline:
-        if _proc and _proc.poll() is not None:
-            return False          # processo morreu — para imediatamente
         try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}/ping", timeout=2) as r:
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/ping", timeout=2
+            ) as r:
                 if r.status == 200:
                     return True
         except Exception:
             pass
-        time.sleep(0.5)
+        time.sleep(0.3)
     return False
 
 
 def _msgbox(title: str, msg: str, error: bool = True) -> None:
-    """MessageBox Win32 nativo — zero dependências."""
     try:
         import ctypes
-        MB_OK = 0x0
-        ICON  = 0x10 if error else 0x40   # MB_ICONERROR / MB_ICONINFORMATION
-        ctypes.windll.user32.MessageBoxW(0, msg, title, MB_OK | ICON)
+        icon = 0x10 if error else 0x40
+        ctypes.windll.user32.MessageBoxW(0, msg, title, 0x0 | icon)
     except Exception:
-        print(f"{'ERRO' if error else 'INFO'}: {title}\n{msg}", file=sys.stderr)
+        print(f"{title}: {msg}", file=sys.stderr)
 
 
 def _odbc_ok() -> bool:
@@ -83,6 +66,7 @@ def _odbc_ok() -> bool:
 
 
 def _install_odbc(bundle_dir: Path) -> bool:
+    import subprocess
     msi = bundle_dir / "assets" / "msodbcsql.msi"
     if not msi.exists():
         return False
@@ -97,23 +81,40 @@ def _install_odbc(bundle_dir: Path) -> bool:
         return False
 
 
-# ── Main (linear, sem threads, sem retry) ────────────────────────────────────
+def _start_uvicorn(port: int, bundle_dir: Path) -> None:
+    """Roda uvicorn na thread atual (chamado em thread daemon)."""
+    # Garante que os módulos do bundle sejam encontrados
+    if str(bundle_dir) not in sys.path:
+        sys.path.insert(0, str(bundle_dir))
+
+    import uvicorn
+    uvicorn.run(
+        "app.main:app",
+        host="127.0.0.1",
+        port=port,
+        log_level="warning",
+        loop="asyncio",
+    )
+
 
 def main() -> None:
-    global _proc
-
     bundle_dir = _get_bundle_dir()
     os.chdir(bundle_dir)
 
+    # Adiciona bundle_dir ao path para imports funcionarem
+    if str(bundle_dir) not in sys.path:
+        sys.path.insert(0, str(bundle_dir))
+
     # 1. ODBC
     if not _odbc_ok():
-        _msgbox("Instalando componente", "Instalando ODBC Driver 18...\nAguarde.", error=False)
+        _msgbox("Instalando componente",
+                "Instalando ODBC Driver...\nAguarde.", error=False)
         if not _install_odbc(bundle_dir):
             _msgbox(
                 "Erro — ODBC Driver",
-                "Não foi possível instalar o ODBC Driver automaticamente.\n\n"
-                "Execute o programa como Administrador e tente novamente.\n"
-                "Ou instale manualmente: aka.ms/odbc18",
+                "Não foi possível instalar o ODBC Driver.\n\n"
+                "Execute como Administrador ou instale manualmente:\n"
+                "aka.ms/odbc18",
             )
             os._exit(1)
 
@@ -124,39 +125,27 @@ def main() -> None:
         _msgbox("Erro — Porta", str(e))
         os._exit(1)
 
-    # 3. Uvicorn — UM único Popen
-    creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-    _proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "app.main:app",
-         "--host", "127.0.0.1", "--port", str(port), "--log-level", "warning"],
-        cwd=str(bundle_dir),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        creationflags=creationflags,
-    )
-
-    # Drena pipe em background para evitar deadlock
-    import threading
-    threading.Thread(
-        target=lambda: [_ for _ in _proc.stdout],
+    # 3. Uvicorn em thread (mesmo processo — sem subprocesso)
+    t = threading.Thread(
+        target=_start_uvicorn,
+        args=(port, bundle_dir),
         daemon=True,
-    ).start()
+    )
+    t.start()
 
-    # 4. Aguarda servidor (para se o processo morrer)
-    if not _wait_server(port, timeout=60):
-        rc = _proc.poll()
+    # 4. Aguarda servidor
+    if not _wait_server(port, timeout=30):
         _msgbox(
-            "Erro — Servidor não iniciou",
-            f"O servidor interno falhou (código {rc}).\n\n"
-            "Possíveis causas:\n"
-            "• Driver ODBC não compatível (execute como Administrador)\n"
-            "• SQL Server inacessível (verifique rede / VPN)\n"
-            "• Antivírus bloqueando o processo",
+            "Erro — Servidor",
+            "O servidor não iniciou em 30 segundos.\n\n"
+            "Verifique:\n"
+            "• Driver ODBC instalado\n"
+            "• Rede / VPN disponível\n"
+            "• Antivírus não está bloqueando",
         )
-        _kill()
         os._exit(1)
 
-    # 5. Abre WebView (janela nativa)
+    # 5. WebView
     try:
         import webview
         window = webview.create_window(
@@ -166,18 +155,12 @@ def main() -> None:
             min_size=(900, 600),
             confirm_close=False,
         )
-        window.events.closed += _kill
         webview.start(debug=False)
     except Exception:
-        # Fallback: abre no browser padrão
         import webbrowser
         webbrowser.open(f"http://127.0.0.1:{port}")
-        try:
-            _proc.wait()
-        except KeyboardInterrupt:
-            pass
+        t.join()
 
-    _kill()
     os._exit(0)
 
 

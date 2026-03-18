@@ -1,13 +1,8 @@
 """
 launcher.py — Entry point do bundle PyInstaller para Central de Ferramentas.
 
-Fluxo:
-  1. Abre splash (tkinter) com barra animada indeterminada
-  2. Verifica/instala ODBC Driver 18 silenciosamente
-  3. Inicia uvicorn em subprocess sem janela de console
-  4. Aguarda servidor responder em /ping (timeout 60s)
-  5. Fecha splash, abre janela PyWebView
-  6. Ao fechar a janela, encerra o processo uvicorn
+Splash screen implementada com Win32 puro via ctypes (sem tkinter, sem Qt).
+Funciona garantidamente dentro do bundle PyInstaller --onefile.
 """
 import os
 import sys
@@ -18,7 +13,7 @@ import subprocess
 import atexit
 from pathlib import Path
 
-# Processo global — garantia de kill mesmo em crash
+# ── Processo global ───────────────────────────────────────────────────────────
 _server_proc: subprocess.Popen | None = None
 
 
@@ -61,7 +56,6 @@ def _wait_for_server(port: int, timeout: int = 60) -> bool:
     import urllib.request
     deadline = time.time() + timeout
     while time.time() < deadline:
-        # Se o processo filho morreu, não adianta esperar
         if _server_proc and _server_proc.poll() is not None:
             return False
         try:
@@ -102,162 +96,249 @@ def _install_odbc_driver(bundle_dir: Path) -> bool:
         return False
 
 
-# ── Splash screen ─────────────────────────────────────────────────────────────
+# ── Splash Win32 nativo (ctypes) ──────────────────────────────────────────────
 
-class SplashScreen:
-    """Janela de carregamento com barra animada indeterminada.
-
-    - X sempre fecha (mata tudo via os._exit)
-    - Em erro: mostra mensagem + botão Fechar
-    - Barra indeterminada: não mente sobre o progresso real
+def _run_splash(status_ref: list, stop_event: threading.Event) -> None:
     """
+    Cria uma janela Win32 simples com GDI para mostrar status e animação.
+    Roda na thread principal (necessário no Windows para message pump).
+    status_ref[0] = texto atual | status_ref[1] = True → fechar | status_ref[2] = erro
+    """
+    import ctypes
+    import ctypes.wintypes as wt
 
-    BAR_W = 360
-    CHUNK = 80   # largura do bloco animado
-    STEP  = 6    # pixels por frame
-    FPS   = 30   # frames por segundo
+    user32   = ctypes.windll.user32
+    gdi32    = ctypes.windll.gdi32
+    kernel32 = ctypes.windll.kernel32
 
-    def __init__(self) -> None:
-        import tkinter as tk
-        self._tk = tk
-        self._root = tk.Tk()
-        self._root.title("Central de Ferramentas")
-        self._root.resizable(False, False)
-        # X sempre encerra tudo imediatamente
-        self._root.protocol("WM_DELETE_WINDOW", self._force_exit)
+    # Constantes Win32
+    WS_POPUP        = 0x80000000
+    WS_VISIBLE      = 0x10000000
+    CS_HREDRAW      = 0x0002
+    CS_VREDRAW      = 0x0001
+    WM_DESTROY      = 0x0002
+    WM_PAINT        = 0x000F
+    WM_TIMER        = 0x0113
+    WM_CLOSE        = 0x0010
+    WM_LBUTTONUP    = 0x0202
+    IDT_ANIM        = 1
+    IDT_CHECK       = 2
+    COLOR_WINDOW    = 5
 
-        w, h = 440, 230
-        sw = self._root.winfo_screenwidth()
-        sh = self._root.winfo_screenheight()
-        self._root.geometry(f"{w}x{h}+{(sw-w)//2}+{(sh-h)//2}")
-        self._root.configure(bg="#1a1a2e")
+    # Cores (GDI usa BGR)
+    BG_COLOR    = 0x2e1a1a  # #1a1a2e
+    TEXT_COLOR  = 0xe8e2e2  # #e2e8f0
+    SUB_COLOR   = 0xb8a394  # #94a3b8
+    BAR_BG      = 0x48372d  # #2d3748
+    BAR_FG      = 0xf16363  # #6366f1
+    ERR_COLOR   = 0x7171f8  # #f87171
 
-        tk.Label(
-            self._root, text="Central de Ferramentas",
-            font=("Segoe UI", 16, "bold"),
-            bg="#1a1a2e", fg="#e2e8f0",
-        ).pack(pady=(28, 4))
+    W, H = 440, 210
+    anim_x   = [0]
+    anim_dir = [1]
+    CHUNK    = 80
+    BAR_W    = 360
+    hwnd_ref = [None]
 
-        self._status_var = tk.StringVar(value="Iniciando...")
-        tk.Label(
-            self._root, textvariable=self._status_var,
-            font=("Segoe UI", 10),
-            bg="#1a1a2e", fg="#94a3b8",
-        ).pack(pady=(0, 14))
+    def wnd_proc(hwnd, msg, wparam, lparam):
+        if msg == WM_DESTROY:
+            user32.KillTimer(hwnd, IDT_ANIM)
+            user32.KillTimer(hwnd, IDT_CHECK)
+            user32.PostQuitMessage(0)
+            return 0
 
-        # Canvas para barra indeterminada
-        self._canvas = tk.Canvas(
-            self._root, width=self.BAR_W, height=10,
-            bg="#2d3748", highlightthickness=0,
+        if msg == WM_CLOSE:
+            _kill_server()
+            os._exit(0)
+
+        if msg == WM_TIMER:
+            if wparam == IDT_ANIM:
+                # Avança animação
+                anim_x[0] += 6 * anim_dir[0]
+                if anim_x[0] + CHUNK >= BAR_W:
+                    anim_x[0] = BAR_W - CHUNK
+                    anim_dir[0] = -1
+                elif anim_x[0] <= 0:
+                    anim_x[0] = 0
+                    anim_dir[0] = 1
+                user32.InvalidateRect(hwnd, None, False)
+
+            if wparam == IDT_CHECK:
+                # Verifica se a thread de startup pediu para fechar
+                if status_ref[1]:
+                    user32.DestroyWindow(hwnd)
+            return 0
+
+        if msg == WM_PAINT:
+            ps = ctypes.create_string_buffer(64)
+            hdc = user32.BeginPaint(hwnd, ps)
+
+            # Fundo
+            rc = (ctypes.c_long * 4)(0, 0, W, H)
+            bg_brush = gdi32.CreateSolidBrush(BG_COLOR)
+            user32.FillRect(hdc, rc, bg_brush)
+            gdi32.DeleteObject(bg_brush)
+
+            # Título
+            title_font = gdi32.CreateFontW(
+                22, 0, 0, 0, 700, 0, 0, 0, 0, 0, 0, 0, 0, "Segoe UI"
+            )
+            old_font = gdi32.SelectObject(hdc, title_font)
+            ctypes.windll.gdi32.SetBkMode(hdc, 1)  # TRANSPARENT
+            gdi32.SetTextColor(hdc, TEXT_COLOR)
+            rc_title = (ctypes.c_long * 4)(0, 30, W, 70)
+            user32.DrawTextW(hdc, "Central de Ferramentas", -1, rc_title, 0x25)
+            gdi32.SelectObject(hdc, old_font)
+            gdi32.DeleteObject(title_font)
+
+            # Status
+            status_font = gdi32.CreateFontW(
+                16, 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 0, 0, "Segoe UI"
+            )
+            gdi32.SelectObject(hdc, status_font)
+            color = ERR_COLOR if status_ref[2] else SUB_COLOR
+            gdi32.SetTextColor(hdc, color)
+            rc_status = (ctypes.c_long * 4)(20, 75, W - 20, 130)
+            user32.DrawTextW(hdc, status_ref[0], -1, rc_status, 0x25)
+            gdi32.SelectObject(hdc, old_font)
+            gdi32.DeleteObject(status_font)
+
+            # Barra de fundo
+            bar_x = (W - BAR_W) // 2
+            bar_y = 145
+            rc_bar_bg = (ctypes.c_long * 4)(bar_x, bar_y, bar_x + BAR_W, bar_y + 10)
+            bg_bar_brush = gdi32.CreateSolidBrush(BAR_BG)
+            user32.FillRect(hdc, rc_bar_bg, bg_bar_brush)
+            gdi32.DeleteObject(bg_bar_brush)
+
+            # Bloco animado (oculto se erro)
+            if not status_ref[2]:
+                rc_bar_fg = (ctypes.c_long * 4)(
+                    bar_x + anim_x[0], bar_y,
+                    bar_x + anim_x[0] + CHUNK, bar_y + 10
+                )
+                fg_brush = gdi32.CreateSolidBrush(BAR_FG)
+                user32.FillRect(hdc, rc_bar_fg, fg_brush)
+                gdi32.DeleteObject(fg_brush)
+
+            # Instrução em modo erro
+            if status_ref[2]:
+                hint_font = gdi32.CreateFontW(
+                    14, 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 0, 0, "Segoe UI"
+                )
+                gdi32.SelectObject(hdc, hint_font)
+                gdi32.SetTextColor(hdc, SUB_COLOR)
+                rc_hint = (ctypes.c_long * 4)(0, 165, W, 195)
+                user32.DrawTextW(hdc, "Clique no X para fechar.", -1, rc_hint, 0x25)
+                gdi32.SelectObject(hdc, old_font)
+                gdi32.DeleteObject(hint_font)
+
+            user32.EndPaint(hwnd, ps)
+            return 0
+
+        return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
+
+    WNDPROC = ctypes.WINFUNCTYPE(
+        ctypes.c_long, wt.HWND, wt.UINT, wt.WPARAM, wt.LPARAM
+    )
+    proc = WNDPROC(wnd_proc)
+
+    hinstance = kernel32.GetModuleHandleW(None)
+    class_name = "CentralSplash"
+
+    wc = (ctypes.c_long * 12)(
+        ctypes.sizeof(ctypes.c_long) * 12,  # cbSize
+        CS_HREDRAW | CS_VREDRAW,             # style
+        ctypes.cast(proc, ctypes.c_void_p).value,  # lpfnWndProc
+        0, 0,                                # cbClsExtra, cbWndExtra
+        hinstance,                           # hInstance
+        0,                                   # hIcon
+        user32.LoadCursorW(0, 32512),        # hCursor (IDC_ARROW)
+        gdi32.CreateSolidBrush(BG_COLOR),    # hbrBackground
+        0,                                   # lpszMenuName
+        ctypes.cast(
+            ctypes.create_unicode_buffer(class_name),
+            ctypes.c_void_p
+        ).value,                             # lpszClassName
+        0,                                   # hIconSm
+    )
+    user32.RegisterClassExW(wc)
+
+    # Centralizar
+    sw = user32.GetSystemMetrics(0)
+    sh = user32.GetSystemMetrics(1)
+    x = (sw - W) // 2
+    y = (sh - H) // 2
+
+    hwnd = user32.CreateWindowExW(
+        0, class_name, "Central de Ferramentas",
+        WS_POPUP | WS_VISIBLE,
+        x, y, W, H,
+        0, 0, hinstance, 0,
+    )
+    hwnd_ref[0] = hwnd
+
+    # Borda arredondada (Windows 11)
+    try:
+        DWMWA_WINDOW_CORNER_PREFERENCE = 33
+        pref = ctypes.c_int(2)  # DWMWCP_ROUND
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd, DWMWA_WINDOW_CORNER_PREFERENCE,
+            ctypes.byref(pref), ctypes.sizeof(pref)
         )
-        self._canvas.pack()
-        self._block = self._canvas.create_rectangle(
-            0, 0, self.CHUNK, 10, fill="#6366f1", outline=""
-        )
-        self._block_x = 0
-        self._direction = 1
-        self._animating = True
-        self._animate()
+    except Exception:
+        pass
 
-        # Área de erro (oculta)
-        self._error_var = tk.StringVar(value="")
-        self._error_label = tk.Label(
-            self._root, textvariable=self._error_var,
-            font=("Segoe UI", 9),
-            bg="#1a1a2e", fg="#f87171",
-            wraplength=410, justify="center",
-        )
+    user32.SetTimer(hwnd, IDT_ANIM,  33, None)   # ~30fps
+    user32.SetTimer(hwnd, IDT_CHECK, 100, None)   # verifica status a cada 100ms
+    user32.ShowWindow(hwnd, 1)
+    user32.UpdateWindow(hwnd)
 
-        self._btn_close = tk.Button(
-            self._root, text="  Fechar  ",
-            font=("Segoe UI", 9, "bold"),
-            bg="#ef4444", fg="white", relief="flat",
-            padx=16, pady=5,
-            command=self._force_exit,
-        )
+    msg = ctypes.create_string_buffer(48)
+    while user32.GetMessageW(msg, 0, 0, 0) > 0:
+        user32.TranslateMessage(msg)
+        user32.DispatchMessageW(msg)
 
-    # ── Animação ──────────────────────────────────────────────────────────────
-
-    def _animate(self) -> None:
-        if not self._animating:
-            return
-        self._block_x += self.STEP * self._direction
-        # Inverte direção nas bordas
-        if self._block_x + self.CHUNK >= self.BAR_W:
-            self._block_x = self.BAR_W - self.CHUNK
-            self._direction = -1
-        elif self._block_x <= 0:
-            self._block_x = 0
-            self._direction = 1
-        self._canvas.coords(
-            self._block,
-            self._block_x, 0,
-            self._block_x + self.CHUNK, 10,
-        )
-        self._root.after(1000 // self.FPS, self._animate)
-
-    # ── API pública (thread-safe) ─────────────────────────────────────────────
-
-    def set_status(self, text: str) -> None:
-        self._root.after(0, lambda: self._status_var.set(text))
-
-    def show_error(self, message: str) -> None:
-        def _update():
-            self._animating = False
-            self._canvas.coords(self._block, 0, 0, 0, 0)  # esconde bloco
-            self._error_var.set(message)
-            self._error_label.pack(pady=(12, 0))
-            self._btn_close.pack(pady=(10, 0))
-        self._root.after(0, _update)
-
-    def close(self) -> None:
-        def _close():
-            self._animating = False
-            self._root.destroy()
-        self._root.after(0, _close)
-
-    def run(self) -> None:
-        self._root.mainloop()
-
-    # ── Internos ──────────────────────────────────────────────────────────────
-
-    def _force_exit(self) -> None:
-        """Mata tudo imediatamente — sem perguntas."""
-        _kill_server()
-        os._exit(0)
+    stop_event.set()
 
 
-# ── Startup (roda em thread separada) ────────────────────────────────────────
+# ── Startup (thread separada) ─────────────────────────────────────────────────
 
-def _startup(splash: SplashScreen, bundle_dir: Path) -> None:
+def _startup(
+    status_ref: list,
+    stop_event: threading.Event,
+    bundle_dir: Path,
+) -> None:
     global _server_proc
 
-    def fail(msg: str) -> None:
-        """Mostra erro no splash e encerra a thread (usuário clica Fechar)."""
-        splash.show_error(msg)
-        # Não chama sys.exit — deixa o splash visível para o usuário ler
+    def set_status(text: str, error: bool = False) -> None:
+        status_ref[0] = text
+        status_ref[2] = error
 
-    # 1. ODBC Driver
+    def fail(msg: str) -> None:
+        set_status(msg, error=True)
+        # Não fecha o splash — usuário lê o erro e fecha com X
+
+    # 1. ODBC
     if not _odbc_driver_installed():
-        splash.set_status("Instalando ODBC Driver 18 (aguarde)...")
+        set_status("Instalando ODBC Driver 18 (aguarde)...")
         if not _install_odbc_driver(bundle_dir):
             fail(
-                "Não foi possível instalar o ODBC Driver automaticamente.\n\n"
-                "Solução: execute o programa como Administrador.\n"
-                "Se persistir, instale manualmente: aka.ms/odbc18"
+                "Erro: ODBC Driver não instalado.\n"
+                "Execute como Administrador e tente novamente."
             )
             return
 
-    # 2. Porta livre
-    splash.set_status("Alocando porta...")
+    # 2. Porta
+    set_status("Alocando porta...")
     try:
         port = _find_free_port()
     except RuntimeError as exc:
         fail(str(exc))
         return
 
-    # 3. Iniciar uvicorn (uma única vez)
-    splash.set_status("Iniciando servidor...")
+    # 3. Uvicorn
+    set_status("Iniciando servidor...")
     env = os.environ.copy()
     try:
         _server_proc = subprocess.Popen(
@@ -276,54 +357,45 @@ def _startup(splash: SplashScreen, bundle_dir: Path) -> None:
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
         )
     except Exception as exc:
-        fail(f"Erro ao iniciar servidor interno:\n{exc}")
+        fail(f"Erro ao iniciar servidor:\n{exc}")
         return
 
-    # Drena pipe para evitar deadlock por buffer cheio
     threading.Thread(
         target=lambda: [_ for _ in _server_proc.stdout],
         daemon=True,
     ).start()
 
-    # 4. Aguardar resposta
-    splash.set_status("Aguardando servidor responder...")
+    # 4. Aguarda
+    set_status("Aguardando servidor responder...")
     if not _wait_for_server(port, timeout=60):
         rc = _server_proc.poll()
         fail(
-            f"O servidor não respondeu (código de saída: {rc}).\n\n"
-            "Possíveis causas:\n"
-            "• ODBC Driver não instalado (rode como Administrador)\n"
-            "• SQL Server inacessível (verifique a rede/VPN)\n"
-            "• Antivírus bloqueando o processo"
+            f"Servidor não respondeu (código {rc}).\n"
+            "Verifique rede/VPN e execute como Administrador."
         )
         return
 
-    # 5. Sucesso — fecha splash e abre webview
-    splash.set_status("Abrindo aplicação...")
-    time.sleep(0.2)
-    splash.close()
-    time.sleep(0.3)  # aguarda tkinter fechar antes de criar webview
+    # 5. Sinaliza fechamento do splash
+    set_status("Abrindo aplicação...")
+    time.sleep(0.3)
+    status_ref[1] = True  # dispara DestroyWindow no timer IDT_CHECK
 
+    stop_event.wait(timeout=2)  # aguarda splash fechar
+    time.sleep(0.2)
+
+    # 6. WebView
     try:
         import webview
-
         window = webview.create_window(
             title="Central de Ferramentas",
             url=f"http://127.0.0.1:{port}",
-            width=1280,
-            height=820,
+            width=1280, height=820,
             min_size=(900, 600),
             confirm_close=False,
         )
-
-        def _on_closed() -> None:
-            _kill_server()
-
-        window.events.closed += _on_closed
+        window.events.closed += _kill_server
         webview.start(debug=False)
-
     except Exception:
-        # Fallback: abre no browser padrão
         import webbrowser
         webbrowser.open(f"http://127.0.0.1:{port}")
         try:
@@ -340,15 +412,18 @@ def main() -> None:
     bundle_dir = _get_bundle_dir()
     os.chdir(bundle_dir)
 
-    splash = SplashScreen()
+    # status_ref: [texto, fechar_splash, é_erro]
+    status_ref = ["Iniciando...", False, False]
+    stop_event = threading.Event()
 
     threading.Thread(
         target=_startup,
-        args=(splash, bundle_dir),
+        args=(status_ref, stop_event, bundle_dir),
         daemon=True,
     ).start()
 
-    splash.run()  # bloqueia na thread principal até fechar
+    # Splash roda na thread principal (Win32 exige)
+    _run_splash(status_ref, stop_event)
 
 
 if __name__ == "__main__":

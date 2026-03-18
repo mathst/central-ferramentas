@@ -221,10 +221,17 @@ def main() -> None:
             _PORT_FILE.unlink(missing_ok=True)
         except Exception:
             pass
-        _msgbox(
-            "Erro — Servidor",
-            f"O servidor não iniciou.\n\n{detail[:800]}",
-        )
+        # Grava log e abre no Notepad — sem MessageBox bloqueante
+        log = _TEMP / "central_ferramentas_erro.txt"
+        try:
+            log.write_text(
+                f"=== Central de Ferramentas — Erro de inicialização ===\n\n{detail}\n",
+                encoding="utf-8",
+            )
+            import subprocess
+            subprocess.Popen(["notepad.exe", str(log)])
+        except Exception:
+            pass
         os._exit(1)
 
     # 6. Abre no browser padrão (sem WebView2 — zero processos extras)

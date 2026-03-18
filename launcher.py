@@ -1,11 +1,14 @@
 """
 launcher.py — Entry point do bundle PyInstaller (--onefile).
 
-IMPORTANTE: Em --onefile, sys.executable É o próprio .exe.
-Chamar Popen([sys.executable, ...]) re-executa o launcher = loop infinito.
+Estratégia single-instance:
+  - Mutex do Windows garante que só uma instância rode por vez.
+  - Se já existe uma instância, abre o browser apontando para ela e sai.
+  - Porta escolhida é gravada em %TEMP%/central_ferramentas.port para que
+    a segunda instância saiba para onde redirecionar o browser.
 
-Solução: uvicorn roda em thread dentro do MESMO processo.
-Zero subprocessos. Zero risco de loop.
+Sem PyWebView — abre diretamente no browser padrão do usuário.
+Sem subprocessos — uvicorn roda em thread daemon no mesmo processo.
 """
 import os
 import sys
@@ -14,21 +17,24 @@ import time
 import threading
 from pathlib import Path
 
+_PORT_FILE = Path(os.environ.get("TEMP", os.environ.get("TMP", "/tmp"))) / "central_ferramentas.port"
+_MUTEX_NAME = "Global\\CentralFerramentas_SingleInstance"
 
-def _kill_tree() -> None:
-    """Mata o processo atual e todos os filhos (WebView2, etc.)."""
+
+def _acquire_mutex():
+    """Tenta criar o mutex de instância única do Windows.
+    Retorna o handle se conseguiu (primeira instância).
+    Retorna None se já existe outra instância rodando.
+    """
     try:
-        import psutil
-        proc = psutil.Process(os.getpid())
-        for child in proc.children(recursive=True):
-            try:
-                child.kill()
-            except Exception:
-                pass
+        import ctypes
+        handle = ctypes.windll.kernel32.CreateMutexW(None, True, _MUTEX_NAME)
+        last_err = ctypes.windll.kernel32.GetLastError()
+        if last_err == 183:  # ERROR_ALREADY_EXISTS
+            return None
+        return handle
     except Exception:
-        pass
-    finally:
-        os._exit(0)
+        return None  # fora do Windows — deixa passar
 
 
 def _get_bundle_dir() -> Path:
@@ -132,11 +138,27 @@ def main() -> None:
     bundle_dir = _get_bundle_dir()
     os.chdir(bundle_dir)
 
-    # Adiciona bundle_dir ao path para imports funcionarem
     if str(bundle_dir) not in sys.path:
         sys.path.insert(0, str(bundle_dir))
 
-    # 1. ODBC
+    # 1. Single-instance — se já existe, foca a instância existente no browser e sai
+    mutex = _acquire_mutex()
+    if mutex is None:
+        port = None
+        if _PORT_FILE.exists():
+            try:
+                port = int(_PORT_FILE.read_text().strip())
+            except Exception:
+                pass
+        if port:
+            import webbrowser
+            webbrowser.open(f"http://127.0.0.1:{port}")
+        else:
+            _msgbox("Central de Ferramentas",
+                    "Já existe uma instância em execução.", error=False)
+        os._exit(0)
+
+    # 2. ODBC
     if not _odbc_ok():
         _msgbox("Instalando componente",
                 "Instalando ODBC Driver...\nAguarde.", error=False)
@@ -149,14 +171,20 @@ def main() -> None:
             )
             os._exit(1)
 
-    # 2. Porta
+    # 3. Porta
     try:
         port = _free_port()
     except OSError as e:
         _msgbox("Erro — Porta", str(e))
         os._exit(1)
 
-    # 3. Uvicorn em thread (mesmo processo — sem subprocesso)
+    # Grava porta para que instâncias subsequentes possam redirecionar
+    try:
+        _PORT_FILE.write_text(str(port))
+    except Exception:
+        pass
+
+    # 4. Uvicorn em thread daemon (mesmo processo — sem subprocesso)
     t = threading.Thread(
         target=_start_uvicorn,
         args=(port, bundle_dir),
@@ -164,34 +192,38 @@ def main() -> None:
     )
     t.start()
 
-    # 4. Aguarda servidor
+    # 5. Aguarda servidor
     if not _wait_server(port, timeout=30):
         detail = _uvicorn_error or "Sem detalhes — thread falhou silenciosamente."
         _msgbox(
             "Erro — Servidor",
             f"O servidor não iniciou.\n\n{detail[:800]}",
         )
+        try:
+            _PORT_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
         os._exit(1)
 
-    # 5. WebView
-    try:
-        import webview
-        window = webview.create_window(
-            title="Central de Ferramentas",
-            url=f"http://127.0.0.1:{port}",
-            width=1280, height=820,
-            min_size=(900, 600),
-            confirm_close=False,
-        )
-        window.events.closed += lambda: _kill_tree()
-        webview.start(debug=False, on_top_level_window_closed=lambda: _kill_tree())
-    except Exception:
-        import webbrowser
-        webbrowser.open(f"http://127.0.0.1:{port}")
-        t.join()
+    # 6. Abre no browser padrão (sem WebView2 — zero processos extras)
+    import webbrowser
+    webbrowser.open(f"http://127.0.0.1:{port}")
 
-    # webview.start() retornou normalmente — encerra tudo
-    _kill_tree()
+    # 7. Mantém o processo vivo enquanto o servidor estiver respondendo
+    #    Sai automaticamente se o servidor parar (ex: erro interno)
+    try:
+        while True:
+            time.sleep(5)
+            if not _wait_server(port, timeout=3):
+                break
+    except KeyboardInterrupt:
+        pass
+    finally:
+        try:
+            _PORT_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
+        os._exit(0)
 
 
 if __name__ == "__main__":

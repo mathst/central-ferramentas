@@ -812,6 +812,13 @@ async function gerarExcel() {
     document.body.removeChild(a);
     setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
 
+    // Garante que o overlay seja removido mesmo se o evento SSE 'done' não chegou
+    es.close(); _currentSource = null;
+    showOverlay(false);
+    if (!document.getElementById('status-area').innerHTML) {
+      showStatus('✅ Arquivo gerado: ' + filename, 'success');
+    }
+
   } catch (ex) {
     showOverlay(false);
     showStatus('Erro de conexão: ' + ex.message, 'error');

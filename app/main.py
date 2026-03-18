@@ -22,9 +22,52 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import sys
+import pandas as pd
+from openpyxl.utils import get_column_letter
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from processar_saldos_final import conectar_banco, processar_empresa
-from central.state import _df_to_xlsx_bytes
+
+
+def _df_to_xlsx_bytes(df: pd.DataFrame, empresa: int, ano: int) -> bytes:
+    """Converte DataFrame para bytes xlsx (sem salvar em disco)."""
+    fmt_brl = '#,##0.00'
+    df = df.copy()
+    idx_mon = {
+        i for i, c in enumerate(df.columns)
+        if c == "Saldo Anterior" or c.startswith("Saldo ")
+    }
+    for i in idx_mon:
+        df.iloc[:, i] = pd.to_numeric(df.iloc[:, i], errors="coerce")
+
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        wb = writer.book
+        ws = wb.create_sheet(title="Balancete")
+        if "Sheet" in wb.sheetnames:
+            del wb["Sheet"]
+        writer.sheets["Balancete"] = ws
+
+        for col_i, col_name in enumerate(df.columns, 1):
+            ws.cell(row=1, column=col_i, value=col_name)
+
+        for row_i, tup in enumerate(df.itertuples(index=False), 2):
+            for col_i, val in enumerate(tup, 1):
+                if isinstance(val, float) and pd.isna(val):
+                    val = None
+                cell = ws.cell(row=row_i, column=col_i, value=val)
+                if (col_i - 1) in idx_mon and val is not None:
+                    cell.number_format = fmt_brl
+
+        for i, col in enumerate(df.columns, 1):
+            max_len = max(
+                df.iloc[:, i - 1].astype(str).apply(len).max(),
+                len(str(col))
+            ) + 2
+            ws.column_dimensions[get_column_letter(i)].width = min(max_len, 45)
+
+        ws.freeze_panes = "A2"
+
+    return buf.getvalue()
 
 app = FastAPI(docs_url=None, redoc_url=None)
 

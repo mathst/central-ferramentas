@@ -154,10 +154,11 @@ async def gerar(body: GerarRequest):
         if queue:
             await queue.put(msg)
 
+    # Testa conectividade antes de despachar threads
     await push({"type": "step", "msg": "Conectando ao banco de dados..."})
-
     try:
-        conn = conectar_banco()
+        _test_conn = conectar_banco()
+        _test_conn.close()
     except SystemExit:
         await push({"type": "error", "msg": "Falha ao conectar no banco. Verifique a rede."})
         raise HTTPException(status_code=500, detail="Falha na conexão com o banco.")
@@ -167,11 +168,14 @@ async def gerar(body: GerarRequest):
     total = len(empresas)
     concluidas = 0
 
-    loop = asyncio.get_event_loop()
-
+    # Cada thread abre sua própria conexão — pyodbc não é thread-safe
     def _processar(emp: int) -> tuple[int, bytes | None, str | None]:
         try:
-            df = processar_empresa(conn, emp, ano)
+            conn = conectar_banco()
+            try:
+                df = processar_empresa(conn, emp, ano)
+            finally:
+                conn.close()
             if df.empty:
                 return emp, None, f"Empresa {emp}: sem dados para {ano}"
             return emp, _df_to_xlsx_bytes(df, emp, ano), None
@@ -191,8 +195,6 @@ async def gerar(body: GerarRequest):
             else:
                 buffers.append((emp_id, xlsx_bytes))
                 await push({"type": "progress", "msg": f"✓ Empresa {emp_id} concluída", "done": concluidas, "total": total})
-
-    conn.close()
 
     if not buffers:
         msg = "Nenhum dado gerado. " + " | ".join(erros)

@@ -206,15 +206,15 @@ async def gerar(body: GerarRequest):
 
     if len(buffers) == 1:
         emp_id, data = buffers[0]
-        filename = f"BALANCETE {ano} - EMP {emp_id}.xlsx"
+        filename = f"BALANCETE_{ano}_EMP_{emp_id}.xlsx"
         media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     else:
         zip_buf = io.BytesIO()
         with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
             for emp_id, xlsx_data in sorted(buffers):
-                zf.writestr(f"BALANCETE {ano} - EMP {emp_id}.xlsx", xlsx_data)
+                zf.writestr(f"BALANCETE_{ano}_EMP_{emp_id}.xlsx", xlsx_data)
         data = zip_buf.getvalue()
-        filename = f"BALANCETE {ano} - LOTE.zip"
+        filename = f"BALANCETE_{ano}_LOTE.zip"
         media_type = "application/zip"
 
     ok_emps = ", ".join(str(e) for e, _ in sorted(buffers))

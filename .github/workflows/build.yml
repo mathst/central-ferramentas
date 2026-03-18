@@ -5,11 +5,12 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     runs-on: windows-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Checkout
@@ -20,14 +21,36 @@ jobs:
         with:
           version: "latest"
 
-      - name: Install Python via uv
+      - name: Install Python 3.12
         run: uv python install 3.12
 
       - name: Sync dependencies
         run: uv sync
 
+      # Baixa ODBC Driver 18 MSI da Microsoft e embute no bundle
+      - name: Download ODBC Driver 18 MSI
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path assets | Out-Null
+          $url = "https://go.microsoft.com/fwlink/?linkid=2239168"
+          $dest = "assets\msodbcsql.msi"
+          Write-Host "Baixando ODBC Driver 18..."
+          Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
+          $size = (Get-Item $dest).Length / 1MB
+          Write-Host "Download concluído: $([math]::Round($size, 1)) MB"
+
       - name: Build EXE
         run: uv run pyinstaller balancete.spec --clean --noconfirm
+
+      - name: Verify EXE exists
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist\CentralFerramentas.exe")) {
+            Write-Error "EXE não encontrado em dist\"
+            exit 1
+          }
+          $size = (Get-Item "dist\CentralFerramentas.exe").Length / 1MB
+          Write-Host "EXE gerado: $([math]::Round($size, 1)) MB"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

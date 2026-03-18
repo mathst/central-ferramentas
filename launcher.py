@@ -89,16 +89,25 @@ def _start_uvicorn(port: int, bundle_dir: Path) -> None:
     global _uvicorn_error
     if str(bundle_dir) not in sys.path:
         sys.path.insert(0, str(bundle_dir))
+
+    # console=False no PyInstaller zera sys.stdout/stderr → uvicorn logging quebra
+    import io as _io
+    if sys.stdout is None:
+        sys.stdout = _io.StringIO()
+    if sys.stderr is None:
+        sys.stderr = _io.StringIO()
+
     try:
         import uvicorn
         uvicorn.run(
             "app.main:app",
             host="127.0.0.1",
             port=port,
+            log_config=None,   # desativa configuração de logging do uvicorn
             log_level="warning",
             loop="asyncio",
         )
-    except Exception as e:
+    except Exception:
         import traceback
         _uvicorn_error = traceback.format_exc()
 

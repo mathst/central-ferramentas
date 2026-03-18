@@ -54,6 +54,7 @@ hiddenimports = [
     "openpyxl", *collect_submodules("openpyxl"),
     "lxml", "lxml.etree", *collect_submodules("lxml"),
     "pyodbc",
+    "psutil",
     "xlrd",
     "dotenv",
     "pydantic", "pydantic.v1",

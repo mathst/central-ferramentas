@@ -167,12 +167,16 @@ def main() -> None:
             min_size=(900, 600),
             confirm_close=False,
         )
+        # on_closed: callback chamado quando a janela fecha — força saída imediata
+        window.events.closed += lambda: os._exit(0)
         webview.start(debug=False)
     except Exception:
         import webbrowser
         webbrowser.open(f"http://127.0.0.1:{port}")
+        # Fallback: espera a thread do uvicorn (não tem como detectar fechamento do browser)
         t.join()
 
+    # Garante que TODOS os processos filhos (WebView2, etc.) sejam encerrados
     os._exit(0)
 
 

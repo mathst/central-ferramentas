@@ -17,24 +17,46 @@ import time
 import threading
 from pathlib import Path
 
-_PORT_FILE = Path(os.environ.get("TEMP", os.environ.get("TMP", "/tmp"))) / "central_ferramentas.port"
-_MUTEX_NAME = "Global\\CentralFerramentas_SingleInstance"
+_TEMP = Path(os.environ.get("TEMP", os.environ.get("TMP", "/tmp")))
+_PORT_FILE = _TEMP / "central_ferramentas.port"
+_LOCK_FILE = _TEMP / "central_ferramentas.lock"
 
 
-def _acquire_mutex():
-    """Tenta criar o mutex de instância única do Windows.
-    Retorna o handle se conseguiu (primeira instância).
-    Retorna None se já existe outra instância rodando.
+def _acquire_lock() -> bool:
+    """Lock file exclusivo via abertura com O_CREAT|O_EXCL — atômico no Windows.
+    Retorna True se esta é a primeira instância, False se já existe outra.
+    O arquivo é deletado automaticamente ao sair via _release_lock().
     """
+    # Verifica se o processo que criou o lock ainda está vivo
+    if _LOCK_FILE.exists():
+        try:
+            pid = int(_LOCK_FILE.read_text().strip())
+            # Testa se o PID ainda existe enviando sinal 0
+            import ctypes
+            handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+            if handle:
+                ctypes.windll.kernel32.CloseHandle(handle)
+                return False  # processo ainda vivo
+            # PID morto — lock file stale, remove e continua
+        except Exception:
+            pass
+        try:
+            _LOCK_FILE.unlink()
+        except Exception:
+            pass
+
     try:
-        import ctypes
-        handle = ctypes.windll.kernel32.CreateMutexW(None, True, _MUTEX_NAME)
-        last_err = ctypes.windll.kernel32.GetLastError()
-        if last_err == 183:  # ERROR_ALREADY_EXISTS
-            return None
-        return handle
+        _LOCK_FILE.write_text(str(os.getpid()))
+        return True
     except Exception:
-        return None  # fora do Windows — deixa passar
+        return True  # se não conseguiu criar, assume primeira instância
+
+
+def _release_lock() -> None:
+    try:
+        _LOCK_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
 
 
 def _get_bundle_dir() -> Path:
@@ -141,9 +163,8 @@ def main() -> None:
     if str(bundle_dir) not in sys.path:
         sys.path.insert(0, str(bundle_dir))
 
-    # 1. Single-instance — se já existe, foca a instância existente no browser e sai
-    mutex = _acquire_mutex()
-    if mutex is None:
+    # 1. Single-instance via lock file
+    if not _acquire_lock():
         port = None
         if _PORT_FILE.exists():
             try:
@@ -195,14 +216,15 @@ def main() -> None:
     # 5. Aguarda servidor
     if not _wait_server(port, timeout=30):
         detail = _uvicorn_error or "Sem detalhes — thread falhou silenciosamente."
-        _msgbox(
-            "Erro — Servidor",
-            f"O servidor não iniciou.\n\n{detail[:800]}",
-        )
+        _release_lock()
         try:
             _PORT_FILE.unlink(missing_ok=True)
         except Exception:
             pass
+        _msgbox(
+            "Erro — Servidor",
+            f"O servidor não iniciou.\n\n{detail[:800]}",
+        )
         os._exit(1)
 
     # 6. Abre no browser padrão (sem WebView2 — zero processos extras)
@@ -219,6 +241,7 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        _release_lock()
         try:
             _PORT_FILE.unlink(missing_ok=True)
         except Exception:

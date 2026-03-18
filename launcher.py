@@ -1,10 +1,8 @@
 """
 launcher.py — Entry point do bundle PyInstaller (--onefile).
 
-Estratégia single-instance:
-  - Mutex nomeado do Windows (CreateMutexW) garante atomicamente que só
-    uma instância rode por vez — sem race condition de lock file.
-  - Segunda instância: lê a porta do arquivo de porta, abre o browser e sai.
+Single-instance via lock file em %TEMP% (mais robusto que mutex Win32
+para processos que encerram abruptamente).
 
 Sem PyWebView — abre no browser padrão (zero processos extras).
 Sem subprocessos — uvicorn roda em thread daemon no mesmo processo.
@@ -19,42 +17,47 @@ from pathlib import Path
 
 _TEMP      = Path(os.environ.get("TEMP", os.environ.get("TMP", "/tmp")))
 _PORT_FILE = _TEMP / "central_ferramentas.port"
+_LOCK_FILE = _TEMP / "central_ferramentas.lock"
 _LOG_FILE  = _TEMP / "central_ferramentas_erro.txt"
 
-# Mutex Win32 nomeado — garante single-instance de forma atômica
-_MUTEX_NAME = "Global\\CentralFerramentasApp_SingleInstance"
-_mutex_handle = None  # mantido vivo enquanto o processo rodar
+_lock_handle = None  # mantido aberto enquanto somos a instância primária
 
 
-def _acquire_mutex() -> bool:
-    """Cria/abre mutex nomeado. Retorna True se esta é a 1ª instância."""
-    global _mutex_handle
+def _acquire_lock() -> bool:
+    """
+    Abre o lock file em modo exclusivo via msvcrt.locking (Windows).
+    Retorna True se esta é a 1ª instância, False se já existe outra.
+    """
+    global _lock_handle
     try:
-        import ctypes
-        kernel32 = ctypes.windll.kernel32
-        handle = kernel32.CreateMutexW(None, True, _MUTEX_NAME)
-        last_err = kernel32.GetLastError()
-        if handle and last_err != 183:  # 183 = ERROR_ALREADY_EXISTS
-            _mutex_handle = handle
-            return True
-        # Já existe — fechar o handle local (não somos donos)
-        if handle:
-            kernel32.CloseHandle(handle)
-        return False
-    except Exception:
-        return True  # em caso de falha inesperada, assume 1ª instância
-
-
-def _release_mutex() -> None:
-    global _mutex_handle
-    if _mutex_handle:
+        import msvcrt
+        # Abre (ou cria) o arquivo; outro processo que já o abriu com lock impede
+        fh = open(str(_LOCK_FILE), "w")
         try:
-            import ctypes
-            ctypes.windll.kernel32.ReleaseMutex(_mutex_handle)
-            ctypes.windll.kernel32.CloseHandle(_mutex_handle)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+            _lock_handle = fh
+            return True
+        except OSError:
+            fh.close()
+            return False
+    except Exception:
+        return True  # fallback: assume 1ª instância
+
+
+def _release_lock() -> None:
+    global _lock_handle
+    if _lock_handle:
+        try:
+            import msvcrt
+            msvcrt.locking(_lock_handle.fileno(), msvcrt.LK_UNLCK, 1)
+            _lock_handle.close()
         except Exception:
             pass
-        _mutex_handle = None
+        _lock_handle = None
+    try:
+        _LOCK_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
 
 
 def _get_bundle_dir() -> Path:
@@ -74,19 +77,21 @@ def _free_port(start: int = 8000) -> int:
     raise OSError("Nenhuma porta livre em 8000-8019.")
 
 
+def _ping(port: int) -> bool:
+    """Verifica se o servidor está respondendo (sem urllib — só socket TCP)."""
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
 def _wait_server(port: int, timeout: int = 30) -> bool:
-    import urllib.request
     deadline = time.time() + timeout
     while time.time() < deadline:
-        try:
-            with urllib.request.urlopen(
-                f"http://127.0.0.1:{port}/ping", timeout=2
-            ) as r:
-                if r.status == 200:
-                    return True
-        except Exception:
-            pass
-        time.sleep(0.3)
+        if _ping(port):
+            return True
+        time.sleep(0.4)
     return False
 
 
@@ -163,21 +168,21 @@ def main() -> None:
     if str(bundle_dir) not in sys.path:
         sys.path.insert(0, str(bundle_dir))
 
-    # ── 1. Single-instance via mutex Win32 ────────────────────────────
-    if not _acquire_mutex():
+    # ── 1. Single-instance via lock file ──────────────────────────
+    if not _acquire_lock():
+        # Já existe outra instância — foca no browser e sai silenciosamente
         port = None
         if _PORT_FILE.exists():
             try:
                 port = int(_PORT_FILE.read_text().strip())
             except Exception:
                 pass
-        if port:
+        if port and _ping(port):
             import webbrowser
             webbrowser.open(f"http://127.0.0.1:{port}")
-        # Sai sem nenhuma janela de erro — já existe uma instância
         os._exit(0)
 
-    # ── 2. ODBC ────────────────────────────────────────────────────────
+    # ── 2. ODBC ────────────────────────────────────────────────────
     if not _odbc_ok():
         if not _install_odbc(bundle_dir):
             _write_log(
@@ -188,15 +193,15 @@ def main() -> None:
                 "  1. Execute o aplicativo como Administrador, ou\n"
                 "  2. Instale manualmente: https://aka.ms/odbc18\n"
             )
-            _release_mutex()
+            _release_lock()
             os._exit(1)
 
-    # ── 3. Porta livre ─────────────────────────────────────────────────
+    # ── 3. Porta livre ─────────────────────────────────────────────
     try:
         port = _free_port()
     except OSError as e:
         _write_log(f"=== Central de Ferramentas — Erro de Porta ===\n\n{e}\n")
-        _release_mutex()
+        _release_lock()
         os._exit(1)
 
     try:
@@ -204,7 +209,7 @@ def main() -> None:
     except Exception:
         pass
 
-    # ── 4. Uvicorn em thread daemon ────────────────────────────────────
+    # ── 4. Uvicorn em thread daemon ────────────────────────────────
     t = threading.Thread(
         target=_start_uvicorn,
         args=(port, bundle_dir),
@@ -212,34 +217,34 @@ def main() -> None:
     )
     t.start()
 
-    # ── 5. Aguarda servidor responder ─────────────────────────────────
+    # ── 5. Aguarda servidor responder ─────────────────────────────
     if not _wait_server(port, timeout=30):
         detail = _uvicorn_error or "Thread do uvicorn falhou silenciosamente."
         _write_log(
             "=== Central de Ferramentas — Servidor não iniciou ===\n\n"
             f"{detail}\n"
         )
-        _release_mutex()
+        _release_lock()
         try:
             _PORT_FILE.unlink(missing_ok=True)
         except Exception:
             pass
         os._exit(1)
 
-    # ── 6. Abre no browser ─────────────────────────────────────────────
+    # ── 6. Abre no browser ─────────────────────────────────────────
     import webbrowser
     webbrowser.open(f"http://127.0.0.1:{port}")
 
-    # ── 7. Mantém o processo vivo enquanto o servidor responder ────────
+    # ── 7. Mantém o processo vivo — keepalive simples ──────────────
+    # Não usa _ping() nem urllib aqui para não competir com conexões SSE.
+    # Dorme até a thread uvicorn morrer (daemon=True), o que só ocorre
+    # se o processo principal encerrar.
     try:
-        while True:
-            time.sleep(5)
-            if not _wait_server(port, timeout=3):
-                break
+        t.join()  # bloqueia até uvicorn parar (process killed ou ctrl+c)
     except KeyboardInterrupt:
         pass
     finally:
-        _release_mutex()
+        _release_lock()
         try:
             _PORT_FILE.unlink(missing_ok=True)
         except Exception:

@@ -11,7 +11,7 @@ import asyncio
 import io
 import json
 import zipfile
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
 from typing import AsyncGenerator
@@ -185,10 +185,15 @@ async def gerar(body: GerarRequest):
 
     await push({"type": "step", "msg": f"Processando {total} empresa(s)..."})
 
+    loop = asyncio.get_event_loop()
     with ThreadPoolExecutor(max_workers=min(4, total)) as pool:
-        futures = {pool.submit(_processar, emp): emp for emp in empresas}
-        for future in as_completed(futures):
-            emp_id, xlsx_bytes, erro = future.result()
+        # run_in_executor não bloqueia o event loop — evita timeout do browser
+        async_futures = [
+            loop.run_in_executor(pool, _processar, emp)
+            for emp in empresas
+        ]
+        for coro in asyncio.as_completed(async_futures):
+            emp_id, xlsx_bytes, erro = await coro
             concluidas += 1
             if erro:
                 erros.append(erro)

@@ -81,20 +81,26 @@ def _install_odbc(bundle_dir: Path) -> bool:
         return False
 
 
+_uvicorn_error: str = ""
+
+
 def _start_uvicorn(port: int, bundle_dir: Path) -> None:
     """Roda uvicorn na thread atual (chamado em thread daemon)."""
-    # Garante que os módulos do bundle sejam encontrados
+    global _uvicorn_error
     if str(bundle_dir) not in sys.path:
         sys.path.insert(0, str(bundle_dir))
-
-    import uvicorn
-    uvicorn.run(
-        "app.main:app",
-        host="127.0.0.1",
-        port=port,
-        log_level="warning",
-        loop="asyncio",
-    )
+    try:
+        import uvicorn
+        uvicorn.run(
+            "app.main:app",
+            host="127.0.0.1",
+            port=port,
+            log_level="warning",
+            loop="asyncio",
+        )
+    except Exception as e:
+        import traceback
+        _uvicorn_error = traceback.format_exc()
 
 
 def main() -> None:
@@ -135,13 +141,10 @@ def main() -> None:
 
     # 4. Aguarda servidor
     if not _wait_server(port, timeout=30):
+        detail = _uvicorn_error or "Sem detalhes — thread falhou silenciosamente."
         _msgbox(
             "Erro — Servidor",
-            "O servidor não iniciou em 30 segundos.\n\n"
-            "Verifique:\n"
-            "• Driver ODBC instalado\n"
-            "• Rede / VPN disponível\n"
-            "• Antivírus não está bloqueando",
+            f"O servidor não iniciou.\n\n{detail[:800]}",
         )
         os._exit(1)
 

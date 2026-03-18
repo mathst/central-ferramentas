@@ -1,0 +1,45 @@
+# Build output
+build/
+dist/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# uv
+.python-version
+
+# Environment / secrets
+.env
+.env.*
+
+# Databases
+*.db
+*.sqlite3
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Reflex / old frontend (removido)
+.web/
+.states/
+rxconfig.py
+
+# Assets não versionados (ODBC driver - baixar manualmente)
+assets/msodbcsql.msi
+assets/external/
+
+# Logs
+*.log

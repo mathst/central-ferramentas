@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Central · Ferramentas Internas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet"/>
+<style>
+/* ── Reset ───────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; }
+html { scroll-behavior: smooth; }
+body {
+    font-family: 'Inter', sans-serif;
+    background-color: #050505;
+    color: #fff;
+    overflow-x: hidden;
+}
+
+/* ── Noise overlay ───────────────────────────── */
+.noise-overlay {
+    position: fixed; inset: 0; z-index: 900;
+    pointer-events: none; opacity: 0.045;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 256px 256px;
+}
+
+/* ── Floating hands ──────────────────────────── */
+@keyframes float-hand-left {
+    0%,100% { transform: translateY(0px) rotate(0deg) scale(1); }
+    33%      { transform: translateY(-28px) rotate(3deg) scale(1.02); }
+    66%      { transform: translateY(-10px) rotate(-1deg) scale(0.99); }
+}
+@keyframes float-hand-right {
+    0%,100% { transform: translateY(0px) rotate(0deg) scale(1); }
+    33%      { transform: translateY(24px) rotate(-3deg) scale(1.01); }
+    66%      { transform: translateY(8px) rotate(1deg) scale(0.98); }
+}
+.hand-left {
+    position: absolute; left: -8%; top: -12%;
+    width: clamp(260px,40vw,720px); pointer-events: none;
+    mix-blend-mode: hard-light; opacity: 0.75;
+    animation: float-hand-left 13s ease-in-out infinite;
+    filter: drop-shadow(0 0 40px rgba(255,69,0,0.25)); z-index: 2;
+}
+.hand-right {
+    position: absolute; right: -8%; bottom: -8%;
+    width: clamp(220px,34vw,640px); pointer-events: none;
+    mix-blend-mode: hard-light; opacity: 0.7;
+    animation: float-hand-right 15s ease-in-out infinite;
+    filter: drop-shadow(0 0 30px rgba(255,69,0,0.2)); z-index: 2;
+}
+
+/* ── Hero parallax ───────────────────────────── */
+#hero-content-wrapper { will-change: transform, opacity; }
+
+/* ── Scroll reveal ───────────────────────────── */
+.js-ready .scroll-reveal {
+    opacity: 0; transform: translateY(20px);
+    transition: opacity 1s cubic-bezier(0.16,1,0.3,1), transform 1s cubic-bezier(0.16,1,0.3,1);
+}
+.js-ready .scroll-reveal.visible { opacity: 1; transform: translateY(0); }
+.js-ready .scroll-reveal-left {
+    opacity: 0; transform: translateX(-16px);
+    transition: opacity 1s cubic-bezier(0.16,1,0.3,1), transform 1s cubic-bezier(0.16,1,0.3,1);
+}
+.js-ready .scroll-reveal-left.visible { opacity: 1; transform: translateX(0); }
+
+@keyframes reveal-up {
+    from { opacity: 0; transform: translateY(20px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.reveal { animation: reveal-up 1s cubic-bezier(0.16,1,0.3,1) both; }
+.reveal-1 { animation-delay: 0.1s; }
+.reveal-2 { animation-delay: 0.25s; }
+.reveal-3 { animation-delay: 0.42s; }
+.reveal-4 { animation-delay: 0.58s; }
+
+/* ── Navbar ──────────────────────────────────── */
+#main-nav {
+    transition: padding .55s cubic-bezier(0.16,1,0.3,1),
+                background .55s cubic-bezier(0.16,1,0.3,1),
+                border-color .55s ease, box-shadow .55s ease;
+}
+#main-nav.scrolled {
+    padding-top: .75rem !important; padding-bottom: .75rem !important;
+    background: rgba(5,5,5,.88) !important;
+    backdrop-filter: blur(16px) !important;
+    border-bottom: 1px solid rgba(255,255,255,.06) !important;
+    box-shadow: 0 4px 30px rgba(0,0,0,.4);
+}
+.nav-link {
+    position: relative; color: rgba(255,255,255,.4);
+    font-size: .85rem; text-decoration: none; transition: color .3s;
+}
+.nav-link::after {
+    content:''; position: absolute; bottom:-3px; left:0;
+    width:0; height:1px; background:#FF4500; transition: width .3s ease;
+}
+.nav-link:hover { color:#fff; }
+.nav-link:hover::after { width:100%; }
+
+/* ── Ghost CTA ───────────────────────────────── */
+.ghost-cta {
+    position: relative; overflow: hidden;
+    border: 1px solid rgba(255,255,255,.12);
+    background: rgba(255,255,255,.04); backdrop-filter: blur(6px);
+    padding: 11px 28px; border-radius: 999px; cursor: pointer;
+    transition: border-color .35s, background .35s, box-shadow .35s;
+    display: inline-flex; align-items: center; gap: 10px;
+    font-size: .78rem; color: rgba(255,255,255,.65);
+    letter-spacing: .13em; text-transform: uppercase; text-decoration: none;
+}
+.ghost-cta:hover {
+    border-color: rgba(255,69,0,.5); background: rgba(255,69,0,.08);
+    box-shadow: 0 0 28px rgba(255,69,0,.2), 0 0 8px rgba(255,69,0,.1) inset;
+}
+.ghost-cta:active { transform: scale(.97); }
+.glow-ring {
+    position: absolute; inset:-1px; border-radius:999px;
+    background: conic-gradient(from 180deg,#FF4500,transparent,#FF4500);
+    opacity:0; transition: opacity .4s; z-index:-1; filter:blur(4px);
+}
+.ghost-cta:hover .glow-ring { opacity:.6; animation: spin-ring 3s linear infinite; }
+@keyframes spin-ring { to { transform: rotate(360deg); } }
+
+/* ── Dot grid ────────────────────────────────── */
+.dot-grid {
+    background-image: radial-gradient(circle, rgba(60,60,60,.7) 1px, transparent 1px);
+    background-size: 38px 38px;
+}
+
+/* ── Module card ─────────────────────────────── */
+.module-card {
+    transition: border-color .5s cubic-bezier(0.16,1,0.3,1),
+                box-shadow .5s cubic-bezier(0.16,1,0.3,1),
+                transform .5s cubic-bezier(0.16,1,0.3,1);
+}
+.module-card:hover {
+    border-color: rgba(255,69,0,.38) !important;
+    box-shadow: 0 20px 60px rgba(255,69,0,.12);
+    transform: translateY(-3px);
+}
+
+/* ── Placeholder card ────────────────────────── */
+.placeholder-card {
+    border: 1px dashed rgba(255,255,255,.08);
+    background: rgba(255,255,255,.015);
+}
+
+/* ── Section line ────────────────────────────── */
+.section-line {
+    width:48px; height:2px;
+    background: linear-gradient(90deg,#FF4500,transparent);
+    border-radius:2px;
+}
+
+/* ── Particles ───────────────────────────────── */
+@keyframes particle-float {
+    0%   { transform:translateY(0) translateX(0) scale(1); opacity:.6; }
+    50%  { transform:translateY(-60px) translateX(20px) scale(1.3); opacity:.2; }
+    100% { transform:translateY(-120px) translateX(-10px) scale(.5); opacity:0; }
+}
+.particle {
+    position:absolute; border-radius:50%; background:#FF4500;
+    pointer-events:none; animation:particle-float linear infinite;
+}
+
+/* ── Pulse dot ───────────────────────────────── */
+@keyframes pulse-dot {
+    0%,100% { box-shadow:0 0 0 0 rgba(255,69,0,.5); }
+    50%      { box-shadow:0 0 0 6px rgba(255,69,0,0); }
+}
+.pulse-dot {
+    width:7px; height:7px; border-radius:50%; background:#FF4500;
+    animation:pulse-dot 2s ease-in-out infinite; display:inline-block;
+}
+
+/* ── Module inputs ───────────────────────────── */
+.module-input {
+    background: #1a1a1a !important; border: 1px solid rgba(255,255,255,.14) !important;
+    border-radius: 12px !important; color: #fff !important;
+    padding: 13px 18px !important; font-size: .95rem !important;
+    width: 100% !important; outline: none !important;
+    transition: border-color .3s, box-shadow .3s, background .3s;
+    font-family:'Inter',sans-serif !important; caret-color:#FF4500;
+}
+.module-input::-webkit-outer-spin-button,
+.module-input::-webkit-inner-spin-button { -webkit-appearance:none; }
+.module-input::placeholder { color:rgba(255,255,255,.35) !important; }
+.module-input:focus {
+    border-color:#FF4500 !important;
+    box-shadow:0 0 0 3px rgba(255,69,0,.18),0 0 20px rgba(255,69,0,.1) !important;
+    background:#1e1209 !important;
+}
+
+/* ── Download button ─────────────────────────── */
+.dl-btn {
+    position:relative; overflow:hidden; width:100%;
+    background:#FF4500; border:none; border-radius:999px;
+    padding:14px 32px; color:#fff; font-size:.92rem; font-weight:500;
+    letter-spacing:.02em; cursor:pointer;
+    transition:filter .3s,transform .25s,box-shadow .3s;
+    font-family:'Inter',sans-serif;
+    display:flex; align-items:center; justify-content:center; gap:8px;
+}
+.dl-btn:not(:disabled):hover {
+    filter:brightness(1.18); transform:translateY(-2px) scale(1.015);
+    box-shadow:0 10px 30px rgba(255,69,0,.4),0 0 0 1px rgba(255,69,0,.2);
+}
+.dl-btn:not(:disabled):active { transform:scale(.97); filter:brightness(.95); }
+.dl-btn:disabled { background:rgba(255,69,0,.45); cursor:not-allowed; }
+.dl-btn .ripple-wave {
+    position:absolute; border-radius:50%; background:rgba(255,255,255,.25);
+    transform:scale(0); animation:ripple-anim .55s linear; pointer-events:none;
+}
+@keyframes ripple-anim { to { transform:scale(4); opacity:0; } }
+.dl-btn::before {
+    content:''; position:absolute; top:0; left:-100%;
+    width:60%; height:100%;
+    background:linear-gradient(120deg,transparent,rgba(255,255,255,.18),transparent);
+    transition:left .45s ease;
+}
+.dl-btn:not(:disabled):hover::before { left:160%; }
+
+/* ── Status badges ───────────────────────────── */
+@keyframes badge-in {
+    from { opacity:0; transform:translateY(8px); }
+    to   { opacity:1; transform:translateY(0); }
+}
+.status-error,.status-ok { animation:badge-in .35s ease both; }
+
+/* ── Loading overlay ─────────────────────────── */
+@keyframes overlay-in { from { opacity:0; } to { opacity:1; } }
+.loading-overlay {
+    position:absolute; inset:0; border-radius:28px;
+    background:rgba(5,5,5,.82); backdrop-filter:blur(8px);
+    display:flex; flex-direction:column; align-items:center;
+    justify-content:center; gap:20px; z-index:20;
+    animation:overlay-in .25s ease both;
+}
+
+/* ── Arc spinner ─────────────────────────────── */
+@keyframes arc-spin { 0% { transform:rotate(0deg); } 100% { transform:rotate(360deg); } }
+.arc-ring { position:relative; width:64px; height:64px; flex-shrink:0; }
+.arc-ring::before,.arc-ring::after {
+    content:''; position:absolute; inset:0; border-radius:50%;
+}
+.arc-ring::before { border:2px solid rgba(255,69,0,.15); }
+.arc-ring::after {
+    border:2px solid transparent; border-top-color:#FF4500;
+    border-right-color:rgba(255,69,0,.4);
+    animation:arc-spin .9s cubic-bezier(.45,.05,.55,.95) infinite;
+    filter:drop-shadow(0 0 8px rgba(255,69,0,.7));
+}
+.arc-dot {
+    position:absolute; width:6px; height:6px; background:#FF4500;
+    border-radius:50%; top:-3px; left:calc(50% - 3px);
+    box-shadow:0 0 10px 3px rgba(255,69,0,.6);
+    animation:arc-spin .9s cubic-bezier(.45,.05,.55,.95) infinite;
+    transform-origin:3px 35px;
+}
+
+/* ── Step text ───────────────────────────────── */
+@keyframes step-in {
+    from { opacity:0; transform:translateY(6px); }
+    to   { opacity:1; transform:translateY(0); }
+}
+.step-text {
+    font-size:.82rem; color:rgba(255,255,255,.7); letter-spacing:.03em;
+    text-align:center; font-family:'Inter',sans-serif;
+    max-width:220px; line-height:1.5;
+}
+.step-text.animate { animation:step-in .3s ease both; }
+
+/* ── Progress track ──────────────────────────── */
+@keyframes track-glow {
+    0%,100% { box-shadow:0 0 6px rgba(255,69,0,.3); }
+    50%      { box-shadow:0 0 14px rgba(255,69,0,.7); }
+}
+.progress-track { width:160px; height:2px; background:rgba(255,255,255,.08); border-radius:99px; overflow:hidden; }
+.progress-bar {
+    height:100%; background:linear-gradient(90deg,#FF4500,#ff7a45);
+    border-radius:99px; animation:track-glow 1.6s ease-in-out infinite;
+    transition:width .4s cubic-bezier(0.16,1,0.3,1);
+    width:0%;
+}
+
+/* ── Icon badge ──────────────────────────────── */
+.icon-badge {
+    width:42px; height:42px; border-radius:50%;
+    background:rgba(255,69,0,.12);
+    display:flex; align-items:center; justify-content:center;
+    transition:background .3s,transform .3s;
+}
+.module-card:hover .icon-badge { background:rgba(255,69,0,.22); transform:rotate(12deg) scale(1.08); }
+
+/* ── Spinner btn ─────────────────────────────── */
+@keyframes spin-pulse { 0% { transform:rotate(0deg); } 100% { transform:rotate(360deg); } }
+.btn-spinner {
+    width:16px; height:16px; border:2px solid rgba(255,255,255,.3);
+    border-top-color:#fff; border-radius:50%;
+    animation:spin-pulse .75s linear infinite; flex-shrink:0;
+}
+</style>
+</head>
+<body>
+
+<div class="noise-overlay"></div>
+
+<!-- ── NAVBAR ───────────────────────────────────────────────────── -->
+<nav id="main-nav" style="position:fixed;top:0;left:0;right:0;z-index:50;
+     padding:1.6rem 0;background:rgba(5,5,5,.55);backdrop-filter:blur(10px);">
+  <div style="display:flex;align-items:center;width:100%;max-width:1200px;
+              margin:0 auto;padding:0 1.5rem;">
+    <a href="#" style="text-decoration:none;display:flex;align-items:center;gap:8px;">
+      <span class="pulse-dot"></span>
+      <span style="font-size:1.35rem;font-weight:700;color:#fff;
+                   letter-spacing:-.04em;font-family:'Playfair Display',serif;">Central.</span>
+    </a>
+    <div style="flex:1"></div>
+    <a href="#modules" class="nav-link" style="display:none" id="nav-modules">Módulos</a>
+    <div style="flex:1"></div>
+    <div style="border:1px solid rgba(255,255,255,.08);padding:5px 16px;
+                border-radius:999px;background:rgba(255,255,255,.03);">
+      <span style="font-size:.72rem;color:rgba(255,255,255,.4);
+                   letter-spacing:.12em;font-family:monospace;">v1.0</span>
+    </div>
+  </div>
+</nav>
+
+<!-- ── HERO ─────────────────────────────────────────────────────── -->
+<section id="hero-section" style="position:relative;min-height:100vh;
+         display:flex;align-items:center;justify-content:center;
+         overflow:hidden;padding-top:5rem;">
+
+  <!-- glows -->
+  <div style="position:absolute;inset:0;pointer-events:none;
+              background:radial-gradient(ellipse 90% 55% at 50% -5%,rgba(255,69,0,.22) 0%,transparent 65%);"></div>
+  <div style="position:absolute;width:700px;height:700px;border-radius:50%;
+              background:radial-gradient(circle,rgba(255,69,0,.14) 0%,transparent 70%);
+              top:50%;left:50%;transform:translate(-50%,-56%);
+              pointer-events:none;filter:blur(50px);"></div>
+
+  <img src="https://framerusercontent.com/images/KNhiA5A2ykNYqNkj04Hk6BVg5A.png?width=1540&height=1320"
+       class="hand-left" alt=""/>
+  <img src="https://framerusercontent.com/images/X89VFCABCEjjZ4oLGa3PjbOmsA.png?width=1542&height=1002"
+       class="hand-right" alt=""/>
+
+  <div id="hero-content-wrapper" style="position:relative;z-index:10;
+       display:flex;flex-direction:column;align-items:center;gap:1.5rem;">
+
+    <div class="reveal reveal-1" style="text-align:center;">
+      <div style="font-size:clamp(3rem,7.5vw,5.8rem);font-weight:500;color:#ffe0e0;
+                  line-height:1.05;letter-spacing:-.03em;font-family:'Playfair Display',serif;
+                  text-shadow:0 0 50px rgba(255,100,30,.45);">Central de</div>
+      <div style="font-size:clamp(3rem,7.5vw,5.8rem);font-weight:300;font-style:italic;
+                  color:#ffe0e0;line-height:1.05;letter-spacing:-.03em;
+                  font-family:'Playfair Display',serif;
+                  text-shadow:0 0 50px rgba(255,100,30,.45);">Ferramentas.</div>
+    </div>
+
+    <p class="reveal reveal-2" style="max-width:460px;text-align:center;
+       font-size:clamp(.88rem,1.8vw,1.05rem);color:rgba(255,255,255,.65);
+       line-height:1.75;font-weight:300;letter-spacing:.01em;">
+      Automações internas para geração de relatórios,
+      extração de dados e análise financeira.
+    </p>
+
+    <a href="#modules" class="ghost-cta reveal reveal-3">
+      <div class="glow-ring"></div>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="2">
+        <path d="M12 5v14M5 12l7 7 7-7"/>
+      </svg>
+      Explorar módulos
+    </a>
+
+    <div class="reveal reveal-4" style="display:flex;align-items:center;gap:12px;
+         font-size:.72rem;color:rgba(255,255,255,.3);letter-spacing:.14em;
+         text-transform:uppercase;font-family:monospace;">
+      <span id="hero-clock">--:-- --</span>
+      <span style="width:1px;height:10px;background:rgba(255,255,255,.2)"></span>
+      <span>Brasil</span>
+    </div>
+  </div>
+</section>
+
+<!-- ── MODULES ───────────────────────────────────────────────────── -->
+<section id="modules" style="padding:7rem 1.5rem;position:relative;"
+         class="dot-grid">
+  <div style="background:linear-gradient(to bottom,#050505 0%,#090909 50%,#050505 100%);
+              position:absolute;inset:0;"></div>
+  <div style="position:relative;display:flex;flex-direction:column;
+              align-items:center;gap:3rem;width:100%;">
+
+    <div class="section-line scroll-reveal-left"></div>
+
+    <div style="text-align:center;">
+      <div class="scroll-reveal" style="font-size:clamp(2rem,4.5vw,3.4rem);
+           font-weight:600;color:#fff;letter-spacing:-.03em;
+           font-family:'Playfair Display',serif;">Módulos</div>
+      <div class="scroll-reveal" style="font-size:clamp(2rem,4.5vw,3.4rem);
+           font-weight:300;font-style:italic;color:rgba(255,255,255,.65);
+           letter-spacing:-.03em;margin-top:-8px;font-family:'Playfair Display',serif;">Disponíveis</div>
+    </div>
+
+    <!-- grid de módulos -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,480px));
+                gap:1.4rem;justify-content:center;width:100%;">
+
+      <!-- ── CARD BALANCETE (ativo) ──────────────────────────────── -->
+      <div class="scroll-reveal" style="grid-column:1;grid-row:1/span 2;">
+        <div id="balancete-card" class="module-card" style="
+             background:#0e0e0e;border:1px solid rgba(255,255,255,.08);
+             border-radius:28px;padding:clamp(1.5rem,4vw,2.5rem);
+             display:flex;flex-direction:column;gap:1.35rem;
+             width:100%;max-width:480px;position:relative;overflow:hidden;">
+
+          <!-- overlay de loading -->
+          <div id="loading-overlay" class="loading-overlay" style="display:none;">
+            <div class="arc-ring"><div class="arc-dot"></div></div>
+            <p id="step-text" class="step-text">Iniciando...</p>
+            <div class="progress-track">
+              <div id="progress-bar" class="progress-bar" style="width:0%"></div>
+            </div>
+          </div>
+
+          <!-- header -->
+          <div style="display:flex;align-items:center;width:100%;">
+            <span style="font-size:.72rem;color:rgba(255,255,255,.38);
+                         border:1px solid rgba(255,255,255,.08);padding:2px 10px;
+                         border-radius:999px;letter-spacing:.06em;">01</span>
+            <div style="flex:1"></div>
+            <div class="icon-badge">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+                   stroke="#FF4500" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2"/>
+                <path d="M3 9h18M9 21V9"/>
+              </svg>
+            </div>
+          </div>
+
+          <!-- título -->
+          <div>
+            <div style="font-size:clamp(1.9rem,3vw,2.5rem);font-weight:600;
+                        color:#fff;line-height:1.05;letter-spacing:-.025em;
+                        font-family:'Playfair Display',serif;">Balancete</div>
+            <div style="font-size:clamp(1.9rem,3vw,2.5rem);font-weight:300;
+                        font-style:italic;color:rgba(255,255,255,.62);line-height:1.05;
+                        margin-top:-6px;font-family:'Playfair Display',serif;">Extrator</div>
+          </div>
+
+          <p style="font-size:.88rem;color:rgba(255,255,255,.38);line-height:1.65;">
+            Gere o balancete mensal diretamente do SQL Server para uma ou múltiplas empresas.
+          </p>
+
+          <div style="height:1px;background:linear-gradient(90deg,rgba(255,69,0,.3),transparent);width:100%;"></div>
+
+          <!-- formulário -->
+          <div style="display:flex;flex-direction:column;gap:.5rem;width:100%;">
+            <label style="font-size:.68rem;letter-spacing:.13em;text-transform:uppercase;
+                          color:rgba(255,255,255,.38);font-weight:500;">Ano de referência</label>
+            <input id="input-ano" class="module-input" type="text"
+                   placeholder="Ex: 2025" maxlength="4"/>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:.5rem;width:100%;">
+            <label style="font-size:.68rem;letter-spacing:.13em;text-transform:uppercase;
+                          color:rgba(255,255,255,.38);font-weight:500;">Nº das empresas</label>
+            <input id="input-empresas" class="module-input" type="text"
+                   placeholder="Ex: 1, 5, 19, 112"/>
+          </div>
+
+          <!-- status -->
+          <div id="status-area"></div>
+
+          <!-- botão -->
+          <button id="dl-btn" class="dl-btn" onclick="gerarExcel()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2.5">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            <span>Baixar Excel</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- ── PLACEHOLDERS ──────────────────────────────────────────── -->
+      <div class="placeholder-card module-card scroll-reveal" style="
+           border-radius:28px;padding:clamp(1.4rem,3.5vw,2.2rem);
+           display:flex;flex-direction:column;gap:1.4rem;
+           width:100%;max-width:480px;min-height:260px;justify-content:space-between;">
+        <div style="display:flex;align-items:center;width:100%;">
+          <span style="font-size:.68rem;color:rgba(255,255,255,.4);
+                       border:1px solid rgba(255,255,255,.08);padding:2px 10px;
+                       border-radius:999px;letter-spacing:.06em;">02</span>
+          <div style="flex:1"></div>
+          <div style="width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.04);
+                      border:1px solid rgba(255,255,255,.07);display:flex;align-items:center;justify-content:center;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                 stroke="rgba(255,255,255,.2)" stroke-width="1.8">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
+            </svg>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:clamp(1.5rem,2.5vw,2rem);font-weight:600;
+                      color:rgba(255,255,255,.15);letter-spacing:-.025em;
+                      font-family:'Playfair Display',serif;">NFS-e Export</div>
+          <div style="height:1px;width:32px;background:rgba(255,255,255,.06);border-radius:2px;margin-top:.5rem;"></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:.5rem;">
+          <div style="width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.12);"></div>
+          <span style="font-size:.68rem;color:rgba(255,255,255,.22);
+                       letter-spacing:.12em;text-transform:uppercase;">Em breve</span>
+        </div>
+      </div>
+
+      <div class="placeholder-card module-card scroll-reveal" style="
+           border-radius:28px;padding:clamp(1.4rem,3.5vw,2.2rem);
+           display:flex;flex-direction:column;gap:1.4rem;
+           width:100%;max-width:480px;min-height:260px;justify-content:space-between;">
+        <div style="display:flex;align-items:center;width:100%;">
+          <span style="font-size:.68rem;color:rgba(255,255,255,.4);
+                       border:1px solid rgba(255,255,255,.08);padding:2px 10px;
+                       border-radius:999px;letter-spacing:.06em;">03</span>
+          <div style="flex:1"></div>
+          <div style="width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.04);
+                      border:1px solid rgba(255,255,255,.07);display:flex;align-items:center;justify-content:center;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                 stroke="rgba(255,255,255,.2)" stroke-width="1.8">
+              <line x1="12" y1="1" x2="12" y2="23"/>
+              <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+            </svg>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:clamp(1.5rem,2.5vw,2rem);font-weight:600;
+                      color:rgba(255,255,255,.15);letter-spacing:-.025em;
+                      font-family:'Playfair Display',serif;">Conciliação</div>
+          <div style="height:1px;width:32px;background:rgba(255,255,255,.06);border-radius:2px;margin-top:.5rem;"></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:.5rem;">
+          <div style="width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.12);"></div>
+          <span style="font-size:.68rem;color:rgba(255,255,255,.22);
+                       letter-spacing:.12em;text-transform:uppercase;">Em breve</span>
+        </div>
+      </div>
+
+      <div class="placeholder-card module-card scroll-reveal" style="
+           border-radius:28px;padding:clamp(1.4rem,3.5vw,2.2rem);
+           display:flex;flex-direction:column;gap:1.4rem;
+           width:100%;max-width:480px;min-height:260px;justify-content:space-between;">
+        <div style="display:flex;align-items:center;width:100%;">
+          <span style="font-size:.68rem;color:rgba(255,255,255,.4);
+                       border:1px solid rgba(255,255,255,.08);padding:2px 10px;
+                       border-radius:999px;letter-spacing:.06em;">04</span>
+          <div style="flex:1"></div>
+          <div style="width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.04);
+                      border:1px solid rgba(255,255,255,.07);display:flex;align-items:center;justify-content:center;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                 stroke="rgba(255,255,255,.2)" stroke-width="1.8">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+            </svg>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:clamp(1.5rem,2.5vw,2rem);font-weight:600;
+                      color:rgba(255,255,255,.15);letter-spacing:-.025em;
+                      font-family:'Playfair Display',serif;">DRE Builder</div>
+          <div style="height:1px;width:32px;background:rgba(255,255,255,.06);border-radius:2px;margin-top:.5rem;"></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:.5rem;">
+          <div style="width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.12);"></div>
+          <span style="font-size:.68rem;color:rgba(255,255,255,.22);
+                       letter-spacing:.12em;text-transform:uppercase;">Em breve</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ── FOOTER ────────────────────────────────────────────────────── -->
+<footer style="border-top:1px solid rgba(255,255,255,.08);padding:3rem 1.5rem;
+               background:#050505;">
+  <div style="display:flex;align-items:flex-end;width:100%;max-width:1200px;margin:0 auto;">
+    <span style="font-size:clamp(3.5rem,9vw,8rem);font-weight:900;
+                 color:rgba(255,255,255,.03);letter-spacing:-.05em;
+                 user-select:none;pointer-events:none;line-height:.85;">CENTRAL.</span>
+    <div style="flex:1"></div>
+    <div style="text-align:right;">
+      <div style="font-size:.72rem;color:rgba(255,255,255,.4);
+                  letter-spacing:.1em;text-transform:uppercase;">Ferramentas Internas</div>
+      <div style="font-size:.72rem;color:rgba(255,255,255,.18);">© 2025</div>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  /* ── navbar scroll ───────────────────────────────────────── */
+  var ticking = false, lastSY = 0;
+  function scrollFrame() {
+    var nav = document.getElementById('main-nav');
+    if (nav) { lastSY > 55 ? nav.classList.add('scrolled') : nav.classList.remove('scrolled'); }
+    var hw = document.getElementById('hero-content-wrapper');
+    if (hw) {
+      var s = Math.min(lastSY, 700);
+      hw.style.transform = 'translateY(' + (s * 0.16) + 'px)';
+      hw.style.opacity = String(Math.max(0, 1 - s / 640));
+    }
+    ticking = false;
+  }
+  window.addEventListener('scroll', function () {
+    lastSY = window.scrollY;
+    if (!ticking) { requestAnimationFrame(scrollFrame); ticking = true; }
+  }, { passive: true });
+  scrollFrame();
+
+  /* ── nav link visível em telas >= 768px ─────────────────── */
+  var navMod = document.getElementById('nav-modules');
+  if (window.innerWidth >= 768 && navMod) navMod.style.display = 'block';
+
+  /* ── smooth scroll âncoras ──────────────────────────────── */
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest('a[href^="#"]');
+    if (!a) return;
+    var id = a.getAttribute('href').slice(1);
+    if (!id) return;
+    var tgt = document.getElementById(id);
+    if (!tgt) return;
+    e.preventDefault();
+    tgt.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+
+  /* ── scroll reveal ───────────────────────────────────────── */
+  document.body.classList.add('js-ready');
+  var obs = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      if (!e.isIntersecting) return;
+      var sibs = Array.from(e.target.parentElement.querySelectorAll('.scroll-reveal,.scroll-reveal-left'));
+      e.target.style.transitionDelay = Math.min(sibs.indexOf(e.target) * 0.06, 0.3) + 's';
+      e.target.classList.add('visible');
+      obs.unobserve(e.target);
+    });
+  }, { threshold: 0.06, rootMargin: '0px 0px -30px 0px' });
+  document.querySelectorAll('.scroll-reveal,.scroll-reveal-left').forEach(function (el) { obs.observe(el); });
+
+  /* ── particles hero ─────────────────────────────────────── */
+  var hero = document.getElementById('hero-section');
+  var sizes = [2,3,4,5], durs = [9,11,13,15,17];
+  for (var i = 0; i < 14; i++) {
+    var p = document.createElement('div');
+    p.className = 'particle';
+    var sz = sizes[i % sizes.length];
+    p.style.cssText = ['width:'+sz+'px','height:'+sz+'px',
+      'left:'+(Math.random()*100)+'%','bottom:'+(Math.random()*28)+'%',
+      'opacity:'+(0.08+Math.random()*0.28),
+      'animation-duration:'+(durs[i%durs.length]+Math.random()*4)+'s',
+      'animation-delay:'+(Math.random()*10)+'s'].join(';');
+    hero.appendChild(p);
+  }
+
+  /* ── clock ───────────────────────────────────────────────── */
+  function tick() {
+    var el = document.getElementById('hero-clock');
+    if (!el) return;
+    var d = new Date(), h = d.getHours(),
+        m = String(d.getMinutes()).padStart(2,'0'), ap = h >= 12 ? 'PM' : 'AM';
+    h = h % 12 || 12;
+    el.textContent = h + ':' + m + ' ' + ap;
+  }
+  tick(); setInterval(tick, 30000);
+
+  /* ── ripple button ───────────────────────────────────────── */
+  var dlBtn = document.getElementById('dl-btn');
+  if (dlBtn) {
+    dlBtn.addEventListener('click', function (e) {
+      if (dlBtn.disabled) return;
+      var r = dlBtn.getBoundingClientRect(), d = Math.max(r.width, r.height);
+      var wave = document.createElement('span');
+      wave.className = 'ripple-wave';
+      wave.style.cssText = 'width:'+d+'px;height:'+d+'px;left:'+(e.clientX-r.left-d/2)+'px;top:'+(e.clientY-r.top-d/2)+'px';
+      dlBtn.appendChild(wave);
+      wave.addEventListener('animationend', function () { wave.remove(); });
+    });
+  }
+})();
+
+/* ── Lógica de geração de Excel ──────────────────────────────── */
+var _currentSource = null;
+
+function setStep(msg, pct) {
+  var el = document.getElementById('step-text');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.remove('animate');
+  void el.offsetWidth; // reflow para re-triggar animação
+  el.classList.add('animate');
+  var bar = document.getElementById('progress-bar');
+  if (bar && pct != null) bar.style.width = pct + '%';
+}
+
+function showOverlay(show) {
+  var ov = document.getElementById('loading-overlay');
+  if (!ov) return;
+  ov.style.display = show ? 'flex' : 'none';
+  var btn = document.getElementById('dl-btn');
+  if (btn) btn.disabled = show;
+}
+
+function showStatus(msg, type) {
+  var area = document.getElementById('status-area');
+  if (!area) return;
+  if (!msg) { area.innerHTML = ''; return; }
+  var isErr = type === 'error';
+  var color = isErr ? '#FF6B6B' : '#6BFFB8';
+  var bg    = isErr ? 'rgba(255,107,107,.07)' : 'rgba(107,255,184,.05)';
+  var bd    = isErr ? 'rgba(255,107,107,.2)'  : 'rgba(107,255,184,.18)';
+  var icon  = isErr
+    ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="'+color+'" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'
+    : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="'+color+'" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>';
+  area.innerHTML = '<div class="'+(isErr?'status-error':'status-ok')+'" style="'
+    +'display:flex;align-items:flex-start;gap:8px;padding:12px 16px;'
+    +'border-radius:12px;background:'+bg+';border:1px solid '+bd+';width:100%;">'
+    +icon+'<span style="font-size:.82rem;color:'+color+';line-height:1.4;">'+msg+'</span></div>';
+}
+
+async function gerarExcel() {
+  var ano = document.getElementById('input-ano').value.trim();
+  var emp = document.getElementById('input-empresas').value.trim();
+
+  showStatus('', '');
+
+  if (!ano || !/^\d{4}$/.test(ano)) {
+    showStatus('Ano inválido. Use 4 dígitos (ex: 2025).', 'error'); return;
+  }
+  var empresas = emp.replace(/[;]/g, ',').replace(/\s+/g, ',')
+                    .split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+  if (!empresas.length) {
+    showStatus('Informe ao menos um número de empresa.', 'error'); return;
+  }
+
+  // ID único para este request — vincula SSE ao POST
+  var reqId = Date.now().toString(36) + Math.random().toString(36).slice(2);
+
+  // Abre SSE antes do POST
+  if (_currentSource) { _currentSource.close(); _currentSource = null; }
+  var es = new EventSource('/progresso/' + reqId);
+  _currentSource = es;
+
+  showOverlay(true);
+  setStep('Validando parâmetros...', 5);
+
+  es.onmessage = function (e) {
+    var d = JSON.parse(e.data);
+    if (d.type === 'step') {
+      var pct = d.msg.includes('Conectando') ? 15
+              : d.msg.includes('Montando')   ? 90 : 50;
+      setStep(d.msg, pct);
+    } else if (d.type === 'progress') {
+      var p = Math.round(15 + (d.done / d.total) * 70);
+      setStep(d.msg, p);
+    } else if (d.type === 'done') {
+      setStep('Concluído!', 100);
+      setTimeout(function () {
+        showOverlay(false);
+        showStatus(d.msg, 'success');
+      }, 400);
+      es.close(); _currentSource = null;
+    } else if (d.type === 'error') {
+      showOverlay(false);
+      showStatus(d.msg, 'error');
+      es.close(); _currentSource = null;
+    }
+  };
+
+  es.onerror = function () { es.close(); _currentSource = null; };
+
+  try {
+    var resp = await fetch('/gerar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ano: parseInt(ano), empresas: empresas, request_id: reqId }),
+    });
+
+    if (!resp.ok) {
+      var err = await resp.json().catch(function () { return { detail: 'Erro desconhecido.' }; });
+      showOverlay(false);
+      showStatus(err.detail || 'Erro ao gerar arquivo.', 'error');
+      es.close(); _currentSource = null;
+      return;
+    }
+
+    // Trigger download via blob
+    var cd = resp.headers.get('Content-Disposition') || '';
+    var fnMatch = cd.match(/filename="([^"]+)"/);
+    var filename = fnMatch ? fnMatch[1] : 'BALANCETE.xlsx';
+    var blob = await resp.blob();
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+
+  } catch (ex) {
+    showOverlay(false);
+    showStatus('Erro de conexão: ' + ex.message, 'error');
+    es.close(); _currentSource = null;
+  }
+}
+</script>
+</body>
+</html>

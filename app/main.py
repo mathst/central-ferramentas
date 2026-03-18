@@ -159,9 +159,10 @@ async def gerar(body: GerarRequest):
     try:
         _test_conn = conectar_banco()
         _test_conn.close()
-    except SystemExit:
-        await push({"type": "error", "msg": "Falha ao conectar no banco. Verifique a rede."})
-        raise HTTPException(status_code=500, detail="Falha na conexão com o banco.")
+    except Exception as _conn_err:
+        msg = f"Falha ao conectar no banco: {_conn_err}"
+        await push({"type": "error", "msg": msg})
+        raise HTTPException(status_code=500, detail=msg)
 
     buffers: list[tuple[int, bytes]] = []
     erros: list[str] = []

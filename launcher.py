@@ -2,13 +2,13 @@
 launcher.py — Entry point do bundle PyInstaller (--onefile).
 
 Estratégia single-instance:
-  - Mutex do Windows garante que só uma instância rode por vez.
-  - Se já existe uma instância, abre o browser apontando para ela e sai.
-  - Porta escolhida é gravada em %TEMP%/central_ferramentas.port para que
-    a segunda instância saiba para onde redirecionar o browser.
+  - Mutex nomeado do Windows (CreateMutexW) garante atomicamente que só
+    uma instância rode por vez — sem race condition de lock file.
+  - Segunda instância: lê a porta do arquivo de porta, abre o browser e sai.
 
-Sem PyWebView — abre diretamente no browser padrão do usuário.
+Sem PyWebView — abre no browser padrão (zero processos extras).
 Sem subprocessos — uvicorn roda em thread daemon no mesmo processo.
+Erros: gravados em %TEMP%/central_ferramentas_erro.txt e abertos no Notepad.
 """
 import os
 import sys
@@ -17,46 +17,44 @@ import time
 import threading
 from pathlib import Path
 
-_TEMP = Path(os.environ.get("TEMP", os.environ.get("TMP", "/tmp")))
+_TEMP      = Path(os.environ.get("TEMP", os.environ.get("TMP", "/tmp")))
 _PORT_FILE = _TEMP / "central_ferramentas.port"
-_LOCK_FILE = _TEMP / "central_ferramentas.lock"
+_LOG_FILE  = _TEMP / "central_ferramentas_erro.txt"
+
+# Mutex Win32 nomeado — garante single-instance de forma atômica
+_MUTEX_NAME = "Global\\CentralFerramentasApp_SingleInstance"
+_mutex_handle = None  # mantido vivo enquanto o processo rodar
 
 
-def _acquire_lock() -> bool:
-    """Lock file exclusivo via abertura com O_CREAT|O_EXCL — atômico no Windows.
-    Retorna True se esta é a primeira instância, False se já existe outra.
-    O arquivo é deletado automaticamente ao sair via _release_lock().
-    """
-    # Verifica se o processo que criou o lock ainda está vivo
-    if _LOCK_FILE.exists():
+def _acquire_mutex() -> bool:
+    """Cria/abre mutex nomeado. Retorna True se esta é a 1ª instância."""
+    global _mutex_handle
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.CreateMutexW(None, True, _MUTEX_NAME)
+        last_err = kernel32.GetLastError()
+        if handle and last_err != 183:  # 183 = ERROR_ALREADY_EXISTS
+            _mutex_handle = handle
+            return True
+        # Já existe — fechar o handle local (não somos donos)
+        if handle:
+            kernel32.CloseHandle(handle)
+        return False
+    except Exception:
+        return True  # em caso de falha inesperada, assume 1ª instância
+
+
+def _release_mutex() -> None:
+    global _mutex_handle
+    if _mutex_handle:
         try:
-            pid = int(_LOCK_FILE.read_text().strip())
-            # Testa se o PID ainda existe enviando sinal 0
             import ctypes
-            handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
-            if handle:
-                ctypes.windll.kernel32.CloseHandle(handle)
-                return False  # processo ainda vivo
-            # PID morto — lock file stale, remove e continua
+            ctypes.windll.kernel32.ReleaseMutex(_mutex_handle)
+            ctypes.windll.kernel32.CloseHandle(_mutex_handle)
         except Exception:
             pass
-        try:
-            _LOCK_FILE.unlink()
-        except Exception:
-            pass
-
-    try:
-        _LOCK_FILE.write_text(str(os.getpid()))
-        return True
-    except Exception:
-        return True  # se não conseguiu criar, assume primeira instância
-
-
-def _release_lock() -> None:
-    try:
-        _LOCK_FILE.unlink(missing_ok=True)
-    except Exception:
-        pass
+        _mutex_handle = None
 
 
 def _get_bundle_dir() -> Path:
@@ -66,14 +64,14 @@ def _get_bundle_dir() -> Path:
 
 
 def _free_port(start: int = 8000) -> int:
-    for port in range(start, start + 10):
+    for port in range(start, start + 20):
         with socket.socket() as s:
             try:
                 s.bind(("127.0.0.1", port))
                 return port
             except OSError:
                 continue
-    raise OSError("Nenhuma porta livre em 8000-8009.")
+    raise OSError("Nenhuma porta livre em 8000-8019.")
 
 
 def _wait_server(port: int, timeout: int = 30) -> bool:
@@ -92,13 +90,14 @@ def _wait_server(port: int, timeout: int = 30) -> bool:
     return False
 
 
-def _msgbox(title: str, msg: str, error: bool = True) -> None:
+def _write_log(content: str) -> None:
+    """Grava log de erro e abre no Notepad (sem janela bloqueante)."""
     try:
-        import ctypes
-        icon = 0x10 if error else 0x40
-        ctypes.windll.user32.MessageBoxW(0, msg, title, 0x0 | icon)
+        _LOG_FILE.write_text(content, encoding="utf-8")
+        import subprocess
+        subprocess.Popen(["notepad.exe", str(_LOG_FILE)])
     except Exception:
-        print(f"{title}: {msg}", file=sys.stderr)
+        pass
 
 
 def _odbc_ok() -> bool:
@@ -129,8 +128,9 @@ _uvicorn_error: str = ""
 
 
 def _start_uvicorn(port: int, bundle_dir: Path) -> None:
-    """Roda uvicorn na thread atual (chamado em thread daemon)."""
+    """Roda uvicorn na thread atual (chamada em thread daemon)."""
     global _uvicorn_error
+
     if str(bundle_dir) not in sys.path:
         sys.path.insert(0, str(bundle_dir))
 
@@ -147,7 +147,7 @@ def _start_uvicorn(port: int, bundle_dir: Path) -> None:
             "app.main:app",
             host="127.0.0.1",
             port=port,
-            log_config=None,   # desativa configuração de logging do uvicorn
+            log_config=None,    # desativa configuração de logging do uvicorn
             log_level="warning",
             loop="asyncio",
         )
@@ -163,8 +163,8 @@ def main() -> None:
     if str(bundle_dir) not in sys.path:
         sys.path.insert(0, str(bundle_dir))
 
-    # 1. Single-instance via lock file
-    if not _acquire_lock():
+    # ── 1. Single-instance via mutex Win32 ────────────────────────────
+    if not _acquire_mutex():
         port = None
         if _PORT_FILE.exists():
             try:
@@ -174,38 +174,37 @@ def main() -> None:
         if port:
             import webbrowser
             webbrowser.open(f"http://127.0.0.1:{port}")
-        else:
-            _msgbox("Central de Ferramentas",
-                    "Já existe uma instância em execução.", error=False)
+        # Sai sem nenhuma janela de erro — já existe uma instância
         os._exit(0)
 
-    # 2. ODBC
+    # ── 2. ODBC ────────────────────────────────────────────────────────
     if not _odbc_ok():
-        _msgbox("Instalando componente",
-                "Instalando ODBC Driver...\nAguarde.", error=False)
         if not _install_odbc(bundle_dir):
-            _msgbox(
-                "Erro — ODBC Driver",
-                "Não foi possível instalar o ODBC Driver.\n\n"
-                "Execute como Administrador ou instale manualmente:\n"
-                "aka.ms/odbc18",
+            _write_log(
+                "=== Central de Ferramentas — Erro ODBC ===\n\n"
+                "Nenhum driver ODBC para SQL Server foi encontrado e a instalação\n"
+                "automática falhou.\n\n"
+                "Solução:\n"
+                "  1. Execute o aplicativo como Administrador, ou\n"
+                "  2. Instale manualmente: https://aka.ms/odbc18\n"
             )
+            _release_mutex()
             os._exit(1)
 
-    # 3. Porta
+    # ── 3. Porta livre ─────────────────────────────────────────────────
     try:
         port = _free_port()
     except OSError as e:
-        _msgbox("Erro — Porta", str(e))
+        _write_log(f"=== Central de Ferramentas — Erro de Porta ===\n\n{e}\n")
+        _release_mutex()
         os._exit(1)
 
-    # Grava porta para que instâncias subsequentes possam redirecionar
     try:
         _PORT_FILE.write_text(str(port))
     except Exception:
         pass
 
-    # 4. Uvicorn em thread daemon (mesmo processo — sem subprocesso)
+    # ── 4. Uvicorn em thread daemon ────────────────────────────────────
     t = threading.Thread(
         target=_start_uvicorn,
         args=(port, bundle_dir),
@@ -213,33 +212,25 @@ def main() -> None:
     )
     t.start()
 
-    # 5. Aguarda servidor
+    # ── 5. Aguarda servidor responder ─────────────────────────────────
     if not _wait_server(port, timeout=30):
-        detail = _uvicorn_error or "Sem detalhes — thread falhou silenciosamente."
-        _release_lock()
+        detail = _uvicorn_error or "Thread do uvicorn falhou silenciosamente."
+        _write_log(
+            "=== Central de Ferramentas — Servidor não iniciou ===\n\n"
+            f"{detail}\n"
+        )
+        _release_mutex()
         try:
             _PORT_FILE.unlink(missing_ok=True)
         except Exception:
             pass
-        # Grava log e abre no Notepad — sem MessageBox bloqueante
-        log = _TEMP / "central_ferramentas_erro.txt"
-        try:
-            log.write_text(
-                f"=== Central de Ferramentas — Erro de inicialização ===\n\n{detail}\n",
-                encoding="utf-8",
-            )
-            import subprocess
-            subprocess.Popen(["notepad.exe", str(log)])
-        except Exception:
-            pass
         os._exit(1)
 
-    # 6. Abre no browser padrão (sem WebView2 — zero processos extras)
+    # ── 6. Abre no browser ─────────────────────────────────────────────
     import webbrowser
     webbrowser.open(f"http://127.0.0.1:{port}")
 
-    # 7. Mantém o processo vivo enquanto o servidor estiver respondendo
-    #    Sai automaticamente se o servidor parar (ex: erro interno)
+    # ── 7. Mantém o processo vivo enquanto o servidor responder ────────
     try:
         while True:
             time.sleep(5)
@@ -248,7 +239,7 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
-        _release_lock()
+        _release_mutex()
         try:
             _PORT_FILE.unlink(missing_ok=True)
         except Exception:

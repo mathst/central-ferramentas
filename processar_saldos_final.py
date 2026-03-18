@@ -75,26 +75,23 @@ def _detectar_driver_sql_server() -> str:
 
 
 def conectar_banco() -> pyodbc.Connection:
-    """Estabelece conexão com SQL Server usando o melhor driver disponível."""
-    try:
-        driver = _detectar_driver_sql_server()
-        conn_str = (
-            f"DRIVER={{{driver}}};"
-            f"SERVER={SQL_SERVER};"
-            f"DATABASE={SQL_DATABASE};"
-            f"UID={SQL_USER};"
-            f"PWD={SQL_PASSWORD};"
-            f"TrustServerCertificate=yes;"
-        )
-        conn = pyodbc.connect(conn_str)
-        print(f"✅ Conectado: {SQL_DATABASE}@{SQL_SERVER} via {driver}")
-        return conn
-    except RuntimeError as e:
-        print(f"❌ {e}")
-        sys.exit(1)
-    except pyodbc.Error as e:
-        print(f"❌ Erro de conexão: {e}")
-        sys.exit(1)
+    """Estabelece conexão com SQL Server usando o melhor driver disponível.
+
+    Levanta RuntimeError/pyodbc.Error em vez de sys.exit() para que
+    chamadas vindas de threads (ThreadPoolExecutor) possam capturar o erro
+    sem matar o processo inteiro.
+    """
+    driver = _detectar_driver_sql_server()
+    conn_str = (
+        f"DRIVER={{{driver}}};"
+        f"SERVER={SQL_SERVER};"
+        f"DATABASE={SQL_DATABASE};"
+        f"UID={SQL_USER};"
+        f"PWD={SQL_PASSWORD};"
+        f"TrustServerCertificate=yes;"
+    )
+    conn = pyodbc.connect(conn_str)
+    return conn
 
 
 def buscar_contas(conn, ano: int) -> pd.DataFrame:

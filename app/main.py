@@ -30,7 +30,7 @@ from processar_saldos_final import conectar_banco, processar_empresa
 from processar_distrato import (
     SQL_DISTRATO, SQL_RENDIMENTO_IR, consolidar,
     TIPO_PROC_DISTRATO, COLUNAS_SAIDA,
-    HEADER_FILL, HEADER_FONT, _cor_linha,
+    HEADER_FILL, HEADER_FONT, _cor_linha, _ir_cond,
 )
 
 
@@ -316,14 +316,34 @@ async def gerar_distrato(body: DistratoRequest):
     def _buscar() -> tuple[pd.DataFrame, pd.DataFrame]:
         conn = conectar_banco()
         try:
-            df_dis = pd.read_sql(
-                SQL_DISTRATO, conn,
-                params=[empresa, TIPO_PROC_DISTRATO, inicio, fim],
+            cur = conn.cursor()
+
+            # ── Distrato ──────────────────────────────────────────────
+            sql_dis = SQL_DISTRATO.format(
+                empresa=empresa,
+                tipo_proc=TIPO_PROC_DISTRATO,
+                filtro_status="",
             )
-            df_ren = pd.read_sql(
-                SQL_RENDIMENTO_IR, conn,
-                params=[empresa, inicio, fim],
+            cur.execute(sql_dis, inicio, fim)
+            cols_dis = [c[0] for c in cur.description]
+            df_dis = pd.DataFrame.from_records(cur.fetchall(), columns=cols_dis)
+
+            # ── Auto-detecta EntSai_es de IR para esta empresa ────────
+            cur.execute(
+                f"SELECT TOP 1 esa.EntSai_es "
+                f"FROM dbo.EntSaiEmpAplic esa "
+                f"WHERE esa.Empresa_es = {empresa} AND esa.EntSai_es <> 0 "
+                f"  AND ({_ir_cond()}) "
+                f"GROUP BY esa.EntSai_es ORDER BY COUNT(*) DESC"
             )
+            row = cur.fetchone()
+            entsai_ir = row[0] if row else 1
+
+            # ── Rendimento / IR ───────────────────────────────────────
+            sql_ren = SQL_RENDIMENTO_IR.format(empresa=empresa, entsai_ir=entsai_ir)
+            cur.execute(sql_ren, inicio, fim)
+            cols_ren = [c[0] for c in cur.description]
+            df_ren = pd.DataFrame.from_records(cur.fetchall(), columns=cols_ren)
         finally:
             conn.close()
         return df_dis, df_ren

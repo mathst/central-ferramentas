@@ -63,19 +63,17 @@ def _parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-_ARGS = _parse_args()
-
-SQL_SERVER   = _ARGS.server
-SQL_DATABASE = _ARGS.database
-SQL_USER     = _ARGS.user
-SQL_PASSWORD = _ARGS.password
+SQL_SERVER   = os.getenv("SQL_SERVER",   "10.30.10.238")
+SQL_DATABASE = os.getenv("SQL_DATABASE", "uau")
+SQL_USER     = os.getenv("SQL_USER",     "ti")
+SQL_PASSWORD = os.getenv("SQL_PASSWORD", "ticasaeterra")
 
 # ── Parâmetros de execução ────────────────────────────────────────────────────
 
-EMPRESAS           = _ARGS.empresas
-DATA_INICIO        = _ARGS.inicio
-DATA_FIM           = _ARGS.fim
-TIPO_PROC_DISTRATO = _ARGS.tipo_proc
+EMPRESAS           = [int(e) for e in os.getenv("EMPRESAS", "12").split(",")]
+DATA_INICIO        = os.getenv("DATA_INICIO", "2026-01-01")
+DATA_FIM           = os.getenv("DATA_FIM", date.today().isoformat())
+TIPO_PROC_DISTRATO = int(os.getenv("TIPO_PROC", "17"))
 
 # EntSai_es: 0 = receitas bancárias (rendimento); IR é auto-detectado por empresa
 ENTSAI_RECEITA = 0
@@ -423,8 +421,8 @@ def consolidar(df_distrato: pd.DataFrame, df_rendim: pd.DataFrame) -> pd.DataFra
     df["Data"] = pd.to_datetime(df["Data"], errors="coerce")
     df["Valor"] = (
         pd.to_numeric(df["Valor"], errors="coerce")
-        .map(lambda v: f"{v:_.2f}".replace("_", ".").replace(".", "X", 1)
-             .replace(".", ",").replace("X", ".") if pd.notna(v) else "")
+        .map(lambda v: f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+             if pd.notna(v) else "")
     )
     df.sort_values(["Empresa", "Data"], inplace=True)
     return df

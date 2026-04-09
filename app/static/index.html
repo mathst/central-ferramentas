@@ -490,36 +490,88 @@ body {
         </div>
       </div>
 
-      <!-- ── PLACEHOLDERS ──────────────────────────────────────────── -->
-      <div class="placeholder-card module-card scroll-reveal" style="
-           border-radius:28px;padding:clamp(1.4rem,3.5vw,2.2rem);
-           display:flex;flex-direction:column;gap:1.4rem;
-           width:100%;max-width:480px;min-height:260px;justify-content:space-between;">
-        <div style="display:flex;align-items:center;width:100%;">
-          <span style="font-size:.68rem;color:rgba(255,255,255,.4);
-                       border:1px solid rgba(255,255,255,.08);padding:2px 10px;
-                       border-radius:999px;letter-spacing:.06em;">02</span>
-          <div style="flex:1"></div>
-          <div style="width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.04);
-                      border:1px solid rgba(255,255,255,.07);display:flex;align-items:center;justify-content:center;">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-                 stroke="rgba(255,255,255,.2)" stroke-width="1.8">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-              <polyline points="14 2 14 8 20 8"/>
-              <line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
-            </svg>
+      <!-- ── CARD DISTRATO (ativo) ───────────────────────────────── -->
+      <div class="scroll-reveal">
+        <div id="distrato-card" class="module-card" style="
+             background:#0e0e0e;border:1px solid rgba(255,255,255,.08);
+             border-radius:28px;padding:clamp(1.5rem,4vw,2.5rem);
+             display:flex;flex-direction:column;gap:1.2rem;
+             width:100%;max-width:480px;position:relative;overflow:hidden;">
+
+          <!-- overlay de loading -->
+          <div id="distrato-loading-overlay" class="loading-overlay" style="display:none;">
+            <div class="arc-ring"><div class="arc-dot"></div></div>
+            <p id="distrato-step-text" class="step-text">Iniciando...</p>
+            <div class="progress-track">
+              <div id="distrato-progress-bar" class="progress-bar" style="width:0%"></div>
+            </div>
           </div>
-        </div>
-        <div>
-          <div style="font-size:clamp(1.5rem,2.5vw,2rem);font-weight:600;
-                      color:rgba(255,255,255,.15);letter-spacing:-.025em;
-                      font-family:'Playfair Display',serif;">NFS-e Export</div>
-          <div style="height:1px;width:32px;background:rgba(255,255,255,.06);border-radius:2px;margin-top:.5rem;"></div>
-        </div>
-        <div style="display:flex;align-items:center;gap:.5rem;">
-          <div style="width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.12);"></div>
-          <span style="font-size:.68rem;color:rgba(255,255,255,.22);
-                       letter-spacing:.12em;text-transform:uppercase;">Em breve</span>
+
+          <!-- header -->
+          <div style="display:flex;align-items:center;width:100%;">
+            <span style="font-size:.72rem;color:rgba(255,255,255,.38);
+                         border:1px solid rgba(255,255,255,.08);padding:2px 10px;
+                         border-radius:999px;letter-spacing:.06em;">02</span>
+            <div style="flex:1"></div>
+            <div class="icon-badge">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+                   stroke="#FF4500" stroke-width="2">
+                <line x1="12" y1="1" x2="12" y2="23"/>
+                <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+              </svg>
+            </div>
+          </div>
+
+          <!-- título -->
+          <div>
+            <div style="font-size:clamp(1.7rem,2.8vw,2.2rem);font-weight:600;
+                        color:#fff;line-height:1.05;letter-spacing:-.025em;
+                        font-family:'Playfair Display',serif;">Distrato</div>
+            <div style="font-size:clamp(1.7rem,2.8vw,2.2rem);font-weight:300;
+                        font-style:italic;color:rgba(255,255,255,.62);line-height:1.05;
+                        margin-top:-6px;font-family:'Playfair Display',serif;">& Rendimentos</div>
+          </div>
+
+          <p style="font-size:.88rem;color:rgba(255,255,255,.38);line-height:1.65;">
+            Extrai distratos pagos, rendimentos de aplicação e IR retido por empresa e período.
+          </p>
+
+          <div style="height:1px;background:linear-gradient(90deg,rgba(255,69,0,.3),transparent);width:100%;"></div>
+
+          <!-- formulário -->
+          <div style="display:flex;flex-direction:column;gap:.5rem;width:100%;">
+            <label style="font-size:.68rem;letter-spacing:.13em;text-transform:uppercase;
+                          color:rgba(255,255,255,.38);font-weight:500;">Nº da empresa</label>
+            <input id="input-empresa-distrato" class="module-input" type="number"
+                   placeholder="Ex: 12" min="1"/>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+            <div style="display:flex;flex-direction:column;gap:.5rem;">
+              <label style="font-size:.68rem;letter-spacing:.13em;text-transform:uppercase;
+                            color:rgba(255,255,255,.38);font-weight:500;">Data início</label>
+              <input id="input-inicio-distrato" class="module-input" type="date"/>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:.5rem;">
+              <label style="font-size:.68rem;letter-spacing:.13em;text-transform:uppercase;
+                            color:rgba(255,255,255,.38);font-weight:500;">Data fim</label>
+              <input id="input-fim-distrato" class="module-input" type="date"/>
+            </div>
+          </div>
+
+          <!-- status -->
+          <div id="distrato-status-area"></div>
+
+          <!-- botão -->
+          <button id="dl-btn-distrato" class="dl-btn" onclick="gerarDistrato()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2.5">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            <span>Baixar Excel</span>
+          </button>
         </div>
       </div>
 
@@ -825,6 +877,122 @@ async function gerarExcel() {
     es.close(); _currentSource = null;
   }
 }
+/* ── Lógica Distrato ─────────────────────────────────────── */
+var _distratoSource = null;
+
+function _distratoSetStep(msg, pct) {
+  var el = document.getElementById('distrato-step-text');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.remove('animate'); void el.offsetWidth; el.classList.add('animate');
+  var bar = document.getElementById('distrato-progress-bar');
+  if (bar && pct != null) bar.style.width = pct + '%';
+}
+
+function _distratoShowOverlay(show) {
+  var ov = document.getElementById('distrato-loading-overlay');
+  if (ov) ov.style.display = show ? 'flex' : 'none';
+  var btn = document.getElementById('dl-btn-distrato');
+  if (btn) btn.disabled = show;
+}
+
+function _distratoShowStatus(msg, type) {
+  var area = document.getElementById('distrato-status-area');
+  if (!area) return;
+  if (!msg) { area.innerHTML = ''; return; }
+  var isErr = type === 'error';
+  var color = isErr ? '#FF6B6B' : '#6BFFB8';
+  var bg    = isErr ? 'rgba(255,107,107,.07)' : 'rgba(107,255,184,.05)';
+  var bd    = isErr ? 'rgba(255,107,107,.2)'  : 'rgba(107,255,184,.18)';
+  var icon  = isErr
+    ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="'+color+'" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'
+    : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="'+color+'" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>';
+  area.innerHTML = '<div class="'+(isErr?'status-error':'status-ok')+'" style="'
+    +'display:flex;align-items:flex-start;gap:8px;padding:12px 16px;'
+    +'border-radius:12px;background:'+bg+';border:1px solid '+bd+';width:100%;">'
+    +icon+'<span style="font-size:.82rem;color:'+color+';line-height:1.4;">'+msg+'</span></div>';
+}
+
+async function gerarDistrato() {
+  var empresa = parseInt(document.getElementById('input-empresa-distrato').value.trim());
+  var inicio  = document.getElementById('input-inicio-distrato').value.trim();
+  var fim     = document.getElementById('input-fim-distrato').value.trim();
+
+  _distratoShowStatus('', '');
+
+  if (!empresa || empresa <= 0) {
+    _distratoShowStatus('Informe um número de empresa válido.', 'error'); return;
+  }
+  if (!inicio || !/^\d{4}-\d{2}-\d{2}$/.test(inicio)) {
+    _distratoShowStatus('Data início inválida.', 'error'); return;
+  }
+  if (!fim || !/^\d{4}-\d{2}-\d{2}$/.test(fim)) {
+    _distratoShowStatus('Data fim inválida.', 'error'); return;
+  }
+  if (fim < inicio) {
+    _distratoShowStatus('Data fim deve ser maior ou igual à data início.', 'error'); return;
+  }
+
+  var reqId = Date.now().toString(36) + Math.random().toString(36).slice(2);
+  if (_distratoSource) { _distratoSource.close(); _distratoSource = null; }
+  var es = new EventSource('/progresso/' + reqId);
+  _distratoSource = es;
+
+  _distratoShowOverlay(true);
+  _distratoSetStep('Validando parâmetros...', 5);
+
+  es.onmessage = function (e) {
+    var d = JSON.parse(e.data);
+    if (d.type === 'step') {
+      var pct = d.msg.includes('Conectando') ? 20 : d.msg.includes('Montando') ? 85 : 50;
+      _distratoSetStep(d.msg, pct);
+    } else if (d.type === 'done') {
+      _distratoSetStep('Concluído!', 100);
+      setTimeout(function () {
+        _distratoShowOverlay(false);
+        _distratoShowStatus(d.msg, 'success');
+      }, 400);
+      es.close(); _distratoSource = null;
+    } else if (d.type === 'error') {
+      _distratoShowOverlay(false);
+      _distratoShowStatus(d.msg, 'error');
+      es.close(); _distratoSource = null;
+    }
+  };
+  es.onerror = function () { es.close(); _distratoSource = null; };
+
+  try {
+    var resp = await fetch('/gerar-distrato', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ empresa: empresa, inicio: inicio, fim: fim, request_id: reqId }),
+    });
+    if (!resp.ok) {
+      var err = await resp.json().catch(function () { return { detail: 'Erro desconhecido.' }; });
+      _distratoShowOverlay(false);
+      _distratoShowStatus(err.detail || 'Erro ao gerar arquivo.', 'error');
+      es.close(); _distratoSource = null;
+      return;
+    }
+    var cd = resp.headers.get('Content-Disposition') || '';
+    var fnMatch = cd.match(/filename="([^"]+)"/);
+    var filename = fnMatch ? fnMatch[1] : 'DISTRATO.xlsx';
+    var blob = await resp.blob();
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+    es.close(); _distratoSource = null;
+    _distratoShowOverlay(false);
+    if (!document.getElementById('distrato-status-area').innerHTML) {
+      _distratoShowStatus('✅ Arquivo gerado: ' + filename, 'success');
+    }
+  } catch (ex) {
+    _distratoShowOverlay(false);
+    _distratoShowStatus('Erro de conexão: ' + ex.message, 'error');
+    es.close(); _distratoSource = null;
+  }
+}
 </script>
-</body>
-</html>
